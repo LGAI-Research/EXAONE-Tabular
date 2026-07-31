@@ -1,0 +1,3 @@
+# README.md is the long_description and embeds assets/exaone_logo.png, which lives
+# outside src/ and so is not picked up by the default sdist rules.
+include assets/*.png

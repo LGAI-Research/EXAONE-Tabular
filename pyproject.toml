@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "exaonetabular"
+dynamic = ["version"]  # single-sourced from exaonetabular.__version__
+description = "EXAONE Tabular: in-context learning inference for tabular classification and regression."
+# The GitHub README, not the Hugging Face card (HF_README.md): PyPI renders YAML
+# front matter as literal text. The two are maintained separately.
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+urls = { Homepage = "https://github.com/LGAI-Research/EXAONE-Tabular", Repository = "https://github.com/LGAI-Research/EXAONE-Tabular" }
+dependencies = [
+  # Floors are the versions this release was validated against; caps are the next
+  # major. Exact pins made the package uninstallable next to any peer needing a
+  # newer numpy/scikit-learn, which is most of the scientific stack.
+  # pandas and xarray are deliberately absent: the package never imports them --
+  # only the (unshipped) eval harness does.
+  "numpy>=2.3.5,<3",
+  "scikit-learn>=1.7.2,<2",
+  "torch>=2.6,<3",
+  "safetensors>=0.4.0",
+  "huggingface_hub>=0.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "exaonetabular.__version__" }
+
+[tool.uv]
+required-version = ">=0.6.9"
+
+[tool.uv.pip]
+torch-backend = "auto"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# src layout: without this a fresh clone cannot import the package under test, so
+# `pytest` fails at collection until someone thinks to `pip install -e .` first.
+pythonpath = ["src"]

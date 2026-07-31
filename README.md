@@ -1,0 +1,572 @@
+<br>
+
+<div align="center">
+  <img src="assets/exaone_logo.png" alt="EXAONE Tabular" width="160">
+  <h1>EXAONE Tabular</h1>
+</div>
+
+<br>
+
+<div align="center">
+  <a href="https://huggingface.co/LG-AI-Research/EXAONE-Tabular" style="text-decoration: none;">
+    <img src="https://img.shields.io/badge/🤗-HuggingFace-FC926C?style=for-the-badge" alt="HuggingFace">
+  </a>
+  <a href="https://github.com/LGAI-Research/EXAONE-Tabular" style="text-decoration: none;">
+    <img src="https://img.shields.io/badge/🖥️-GitHub-2B3137?style=for-the-badge" alt="GitHub">
+  </a>
+</div>
+
+<br><br>
+
+**EXAONE Tabular** is a transformer-based **foundation model for tabular data** that solves
+**classification** and **regression** through **in-context learning**: you pass the labeled
+rows to `fit` and the model predicts new rows in a single forward pass — **no gradient
+updates and no per-dataset training**.
+
+This repository is the **`exaonetabular` inference runtime** — a self-contained package
+that loads a released checkpoint and serves predictions through a small, scikit-learn-style API.
+The code here is permissively licensed; the released **weights are non-commercial** — see
+[License](#license).
+
+> **Only the classification checkpoint is available today.** The regression weights have not been
+> published yet, so `EXAONETabularRegressor.from_pretrained()` cannot fetch them —
+> `EXAONETabularClassifier` is the usable path until they land. See
+> [Available checkpoints](#available-checkpoints).
+
+For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular).
+A technical report will follow.
+
+
+## Model Configuration
+
+<div style="background-color: rgba(128, 128, 128, 0.1); border-radius: 12px; padding: 12px 24px;">
+
+- Model Type: In-context tabular foundation model (Cross-axis Summary Transformer (CAST))
+
+- Embedding dimension: 192
+- Attention heads: 6
+- Transformer layers: 12
+- Feed-forward expansion: 4x
+- MLP sharing: Single
+- Feature-attention operations per layer: 2
+- Feature-level summary tokens: 3
+- Row-level summary tokens: 32
+- Attention normalization
+  - Classification: SSMax
+  - Regression: SSMax with fixed coefficient
+- Total parameters
+  - Classification: 20,807,866 (≈20.8M)
+
+</div>
+
+
+## Evaluation Results
+
+> [PLACEHOLDER: replace the placeholder cells below (shown as "—") with measured results, and
+> finalize the baseline columns and benchmark rows. Optionally promote headline numbers to a
+> `model-index` block in the YAML front matter for the Hub's results widget.]
+
+### Classification (accuracy ↑, %)
+
+<table>
+	<tr>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;"> </th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">EXAONE Tabular</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">TabPFN v2</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">XGBoost (tuned)</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">CatBoost (tuned)</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">AutoGluon</th>
+	</tr>
+	<tr>
+		<td align="center">Approach</td>
+		<td align="center">In-context</td>
+		<td align="center">In-context</td>
+		<td align="center">GBDT</td>
+		<td align="center">GBDT</td>
+		<td align="center">AutoML</td>
+	</tr>
+	<tr>
+		<td align="center">Per-dataset tuning</td>
+		<td align="center">None</td>
+		<td align="center">None</td>
+		<td align="center">HPO</td>
+		<td align="center">HPO</td>
+		<td align="center">Auto</td>
+	</tr>
+	<tr>
+		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>OpenML Suites</i></td>
+	</tr>
+	<tr>
+		<td align="center">OpenML-CC18 (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center">AutoML Benchmark (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>Curated Tabular Suites</i></td>
+	</tr>
+	<tr>
+		<td align="center">TabZilla (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center"> — numerical (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center"> — categorical (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+</table>
+
+### Regression (R² ↑)
+
+<table>
+	<tr>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;"> </th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">EXAONE Tabular</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">TabPFN v2</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">XGBoost (tuned)</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">CatBoost (tuned)</th>
+		<th style="background: rgba(128,128,128,0.1); text-align: center;">AutoGluon</th>
+	</tr>
+	<tr>
+		<td align="center">Approach</td>
+		<td align="center">In-context</td>
+		<td align="center">In-context</td>
+		<td align="center">GBDT</td>
+		<td align="center">GBDT</td>
+		<td align="center">AutoML</td>
+	</tr>
+	<tr>
+		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>Curated Tabular Suites</i></td>
+	</tr>
+	<tr>
+		<td align="center">OpenML-CTR23 (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center"> regression (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+	<tr>
+		<td align="center">TabZilla regression (avg)</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+		<td align="center">—</td>
+	</tr>
+</table>
+
+
+## Requirements
+
+- **Python** ≥ 3.11
+- **PyTorch** ≥ 2.6, < 3 &nbsp;(a **CUDA GPU is strongly recommended** — the model uses fused
+  attention kernels and half precision; CPU inference works but is slow)
+- NumPy ≥ 2.3.5 · scikit-learn ≥ 1.7.2 · safetensors ≥ 0.4 · huggingface_hub ≥ 0.24
+  &nbsp;(floors are the versions this release was validated against)
+
+Install the package — the dependencies above come with it:
+
+```bash
+pip install "exaonetabular @ git+https://github.com/LGAI-Research/EXAONE-Tabular.git"
+```
+
+From a checkout, `pip install .` (add `-e` for an editable install) or `uv sync` do the same.
+
+`huggingface_hub` is included, so `from_pretrained` can fetch the released weights out of the box.
+Downloads honor the standard Hub environment (`HF_HOME` for the cache, `HF_TOKEN` for a gated repo).
+
+Verify the install:
+
+```python
+import exaonetabular
+print(exaonetabular.__version__)
+```
+
+> Dependency ranges are declared in
+> [`pyproject.toml`](pyproject.toml)
+> (distribution name `exaonetabular`).
+
+
+## Quickstart
+
+EXAONE Tabular ships as **scikit-learn-style estimators**. `EXAONETabularClassifier` and
+`EXAONETabularRegressor` expose the familiar `fit` / `predict` / `predict_proba` surface, return
+`self` from `fit`, and set the usual fitted attributes — `classes_`, `n_classes_` and
+`n_features_in_` on the classifier, `n_features_in_` on the regressor — so they slot into the
+workflow you already use, including as the final step of a `sklearn.pipeline.Pipeline`.
+
+`from_pretrained` handles the rest in one call: it fetches the released checkpoint from the Hub,
+builds the model from its frozen manifest, and loads the weights. The repo id, revision, and
+architecture are baked into the package, so there is nothing to configure by hand.
+
+Both snippets below run as written, on a stock scikit-learn dataset.
+
+> **Inputs are NumPy arrays.** `X` is 2-D `float` (rows × features); `y` is 1-D — class labels for
+> classification, real values for regression. Anything else raises
+> `TypeError: features must be a NumPy array`.
+
+> **scikit-learn interop.** These estimators implement the estimator *interface* — including
+> `__sklearn_is_fitted__` and `__sklearn_tags__`, so `check_is_fitted`, `is_classifier` /
+> `is_regressor`, and use as the final step of a `Pipeline` all work. They do not subclass
+> `BaseEstimator`, so there is no `get_params` / `set_params` / `score`, and `clone`,
+> `cross_val_score`, and `GridSearchCV` are therefore not supported.
+
+<details open>
+<summary><b>Classification</b></summary>
+
+```python
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+
+from exaonetabular import EXAONETabularClassifier
+
+X_train, X_test, y_train, y_test = train_test_split(
+    *load_breast_cancer(return_X_y=True), test_size=0.25, random_state=0
+)
+
+clf = EXAONETabularClassifier.from_pretrained(device="cuda:0")   # download + verify + load
+
+clf.fit(X_train, y_train)              # no training — stores context + fits preprocessors
+proba  = clf.predict_proba(X_test)     # (n_samples, n_classes)
+labels = clf.predict(X_test)           # (n_samples,)
+```
+
+Datasets with more than the model's class capacity are handled automatically via **ECOC**;
+tables wider than the feature limit are reduced by built-in
+[**feature selection**](#feature-selection-wide-tables).
+</details>
+
+<details>
+<summary><b>Regression</b> (checkpoint not released yet)</summary>
+
+> **The regression checkpoint is not published yet.** `EXAONETabularRegressor` ships with the
+> runtime and the snippet below is its final form, but `from_pretrained()` cannot fetch weights
+> until the file lands on the Hub. Only classification is usable today.
+
+```python
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import train_test_split
+
+from exaonetabular import EXAONETabularRegressor
+
+X_train, X_test, y_train, y_test = train_test_split(
+    *load_diabetes(return_X_y=True), test_size=0.25, random_state=0
+)
+
+reg = EXAONETabularRegressor.from_pretrained(device="cuda:0")
+
+reg.fit(X_train, y_train)          # y: (n,) real-valued
+y_pred = reg.predict(X_test)       # (n_samples,) — median of the predicted quantile distribution
+```
+</details>
+
+> **NaNs and categoricals.** `X` must be numeric — encode string/categorical columns to numeric
+> codes before `fit` (e.g. a stable ordinal map), leaving unseen/missing values as `NaN`. The
+> built-in preprocessor mean-imputes `NaN`s; it does not encode raw strings.
+
+### Overrides
+
+`from_pretrained` accepts optional overrides without leaving the one-call path:
+
+```python
+clf = EXAONETabularClassifier.from_pretrained(
+    device="cuda:0",
+    compute_dtype="bfloat16",  # wider exponent range (default: "float16")
+    ensemble_count=8, seed=0,  # runtime knobs
+    revision="main",           # pin a specific Hub revision (tag or commit sha)
+    max_vram_bytes=24 << 30,   # cap the GPU memory budget (see Out-of-memory below)
+)
+
+# Load your own weights of the same architecture — a local file or a Hub repo id.
+# The released SHA-256 pin only applies to the released file, so it is not enforced
+# here (a warning is logged); shapes, dtype, and finiteness are still validated.
+clf = EXAONETabularClassifier.from_pretrained(weights="/path/to/my-classifier.safetensors")
+```
+
+You can also redirect the weights without touching code via the environment:
+`EXAONETABULAR_CLASSIFIER_WEIGHTS` / `EXAONETABULAR_REGRESSOR_WEIGHTS` (a local path or a repo id).
+
+> **Precision.** The released weights are stored in **float32**. With the default
+> `compute_dtype="float16"` they are cast to fp16 at load — the tested runtime path. fp16 is the
+> default because it is the more precise of the two half formats at the same footprint and
+> throughput — 10 mantissa bits to bf16's 7 — and this model's activations stay far from fp16's
+> 65504 ceiling, so bf16's wider exponent range buys nothing here. The two score the same in our
+> classification benchmarking; prefer `compute_dtype="bfloat16"` only if your inputs can
+> drive activations to that ceiling. `compute_dtype="float32"` is a **CPU-only** path: part of
+> the attention stack is pinned to the FlashAttention kernel, which implements fp16 and bf16
+> only, so a float32 forward on a CUDA device fails with `RuntimeError: No available kernel`.
+
+<details>
+<summary><b>Advanced: fully custom checkpoint (explicit manifest)</b></summary>
+
+`from_pretrained` is a thin layer over the low-level API. For a checkpoint with a **different
+architecture**, describe it with an `InferenceManifest` and load it explicitly — this is the same
+API the released presets are built from:
+
+```python
+from huggingface_hub import hf_hub_download
+from exaonetabular import (
+    EXAONETabularClassifier,
+    InferenceManifest,
+    ModelConfig,
+    RuntimeConfig,
+    load_classifier_checkpoint,
+)
+
+CKPT = hf_hub_download("your-org/your-repo", "your-classifier.safetensors")
+manifest = InferenceManifest(
+    task="classification",
+    model=ModelConfig(class_capacity=10),       # must match the checkpoint's class-head width
+    runtime=RuntimeConfig(ensemble_count=8, compute_dtype="float16", seed=0),
+)
+
+clf = EXAONETabularClassifier(manifest, device="cuda:0")   # builds the model
+load_classifier_checkpoint(CKPT, clf.model, manifest)      # validates + loads weights
+```
+
+Regression is analogous with `EXAONETabularRegressor`, `load_regressor_checkpoint`, and a
+`RegressionConfig(quantile_count=999, decoder_hidden_width=384)`. The frozen manifests the released
+estimators use live in `presets.py` and are reachable via `released_manifest("classification" |
+"regression")`.
+</details>
+
+
+### Feature selection (wide tables)
+
+The classifier accepts tables of any width, but the model itself reads at most **100 columns**. When
+`fit` receives a wider table, it chooses which columns to keep using the model's own attention —
+there is no flag, and nothing to configure:
+
+```python
+clf = EXAONETabularClassifier.from_pretrained(device="cuda:0")
+clf.fit(X_train, y_train)          # X_train: (n, 5000) — selection runs here
+
+clf.n_features_in_                 # 5000 — the public width does not change
+clf.selected_feature_indices_      # (100,) int64, the columns actually kept
+clf.predict_proba(X_test)          # still takes all 5000 columns
+```
+
+**How it works.** One forward pass over a ≤512-row sample of the fitted table, with the
+feature-attention blocks instrumented. Two signals are read per column — attention from the target
+row, and the summed attention from the item-summary rows — each weighted by the value-vector norm so
+the score reflects information actually routed through the attention path rather than raw attention
+probability. The two are min-max normalized, averaged, and the top 100 columns are kept.
+
+**What to expect.**
+
+- Narrow tables (`n_features ≤ 100`) skip this entirely — the pass does not run.
+- Selection is **internal**. `n_features_in_`, `predict`, and `predict_proba` all keep the original
+  width; the fitted column subset is reapplied for you.
+- It costs one extra forward pass per `fit` on a wide table. A GPU is strongly recommended, and in
+  this version there is **no way to disable it**.
+- Classification only. `EXAONETabularRegressor` narrows wide tables with `f_regression` instead.
+
+The configuration is frozen in `config.py` as `FEATURE_SELECTION`. It belongs to the
+architecture rather than to any one checkpoint — the scorers name the model's token layout, so
+the same settings apply to every classifier checkpoint of this architecture.
+
+### Controlling the GPU memory budget
+
+Before running, the estimator measures the GPU, plans one execution strategy that
+fits a memory **budget** (how many ensemble members run at once, how query rows
+and feed-forward tokens are chunked, whether the support cache is offloaded), and
+executes that plan. `max_vram_bytes` sets the budget explicitly:
+
+```python
+clf = EXAONETabularClassifier.from_pretrained(device="cuda:0", max_vram_bytes=24 << 30)
+```
+
+It is a **hard cap**, in bytes, and CUDA-only: the planner both *prefers* to stay
+under it and treats it as the *feasibility* limit, so it will chunk more
+aggressively to fit and will refuse — rather than quietly exceed it — a forward
+whose smallest possible plan does not. Left unset, the budget is everything your
+process can address: total VRAM minus what other processes already hold.
+
+**To spend a proportion of the GPU, compute the bytes yourself** — there is no
+separate fraction argument, because the proportion is only meaningful once you
+choose what it is a proportion *of*:
+
+```python
+import torch
+
+free, total = torch.cuda.mem_get_info(0)   # free = unused now, total = card capacity
+clf = EXAONETabularClassifier.from_pretrained(
+    device="cuda:0",
+    max_vram_bytes=int(0.7 * free),    # 70% of what is actually free right now
+)
+```
+
+> **Pick the denominator deliberately.** `total` is the card's capacity; `free` is
+> what is unused at that moment. On a shared GPU a fraction of `total` can exceed
+> what your process is able to obtain, which plans a forward that cannot run — use
+> `free` unless you own the whole device. Note also that the planner already keeps
+> a ~10% safety margin against the budget on the memory-heaviest build phases, so
+> a budget of *B* is planned to roughly *0.9B*; there is no need to discount twice.
+
+### Out-of-memory and memory fragmentation
+
+Large support sets on a memory-constrained GPU can trigger a CUDA out-of-memory
+error. **The error is raised to you unchanged.** Inference plans once and runs
+that plan; it does not catch the OOM, shrink the budget, and silently retry.
+Recovering costs GPU time and is a policy decision — retry smaller, fall back to
+CPU, fail the request — so it belongs to the caller:
+
+```python
+try:
+    proba = clf.predict_proba(X)
+except torch.cuda.OutOfMemoryError:
+    # Your policy: e.g. re-fit with a lower max_vram_bytes or ensemble_count.
+    ...
+```
+
+Before concluding the model does not fit, check whether the failure is
+**external fragmentation** rather than a true capacity limit. In the CUDA error,
+compare the amount it *tried to allocate* against the `reserved but unallocated`
+figure: when a large amount is reserved-but-unallocated yet a much smaller
+allocation fails, the data would fit but the caching allocator cannot place a
+single contiguous block — that is fragmentation, not lack of memory.
+
+For that case, run with PyTorch's expandable-segments allocator. It lets the
+allocator grow and coalesce segments, which largely removes contiguous-block
+fragmentation:
+
+```bash
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python your_script.py
+```
+
+> It is a **process-global** setting and must be present in the environment
+> **before** CUDA initializes — set it when launching the process, not from inside
+> Python after torch has already allocated. It changes only the allocator; results
+> are unaffected.
+
+If it still OOMs with expandable segments, the working set genuinely exceeds VRAM.
+Reduce the footprint instead, roughly in order of cost to accuracy:
+
+1. **Lower `max_vram_bytes`.** A smaller budget makes the planner chunk harder:
+   slower, but the same computation — chunking splits batch dimensions and does
+   not change the model. Chunked and unchunked results agree to numerical
+   tolerance rather than bit-for-bit, which is visible only in reduced precision.
+2. **Lower `ensemble_count`** (a `from_pretrained` override) — fewer ensemble
+   members is directly less work and less memory, at some accuracy cost.
+3. **Shrink the in-context support set** via the low-level
+   `RuntimeConfig(support_row_limit=…)` manifest path. This is the only lever on
+   the memory floor that grows with support rows, and the most costly to accuracy.
+4. **Use a larger GPU.**
+
+
+## Available checkpoints
+
+| File | Task | Head | Dtype | Notes |
+|---|---|---|---|---|
+| `exaone-tabular-classifier-v1_default.safetensors` | Classification | 10-class | float32 | `> class_capacity` classes handled automatically via ECOC |
+| `exaone-tabular-regressor-v1_default.safetensors`  | Regression    | Quantile / bar distribution (999) | float32 | **Not released yet.** Requires `feature_attention_repeats=2` + a `RegressionConfig` |
+
+Only the classifier is published today; `EXAONETabularRegressor.from_pretrained()` will fail to
+download until the regression file appears in the Hub repository.
+
+Each checkpoint's architecture is **frozen** and must match its `InferenceManifest`; a mismatched
+file (wrong keys, shapes, or dtype) fails loudly at load — never silently.
+
+`InferenceManifest.checkpoint_sha256` can additionally pin one exact file. The released manifests in
+`presets.py` leave it `None` until the final weights are published, so loads log a warning saying
+the bytes were not integrity-checked. Set it once the released file is fixed, and a checkpoint whose
+digest differs is rejected.
+
+
+## Intended use
+
+EXAONE Tabular is intended for **supervised tabular** classification and regression on structured
+(row/column) data, for datasets within the tested sample/feature envelope. High-dimensional inputs
+are handled by built-in [feature selection](#feature-selection-wide-tables); large support sets are
+subsampled. Use of the released weights is limited to
+**non-commercial research and educational** purposes by the EXAONE model license.
+
+**Not intended for:** unstructured data (images, raw text, audio, video); inputs substantially
+beyond the tested envelope, where accuracy and runtime are not guaranteed; any **commercial** use
+of the released weights, or any use excluded by the [license](#license).
+
+
+## Limitation
+
+**Class-Count Handling**. 
+The native classification head supports up to 10 classes. Datasets with larger label
+spaces are handled through an ECOC-based decomposition at inference time. This procedure requires
+multiple binary predictions and therefore increases inference cost as the number of classes grows. A class-
+count-independent prediction head is a potential direction for future work.
+
+**Large-Context Inference**. 
+Query chunking controls peak query-side memory because query predictions
+are conditionally independent given the support set. However, the current inference wrapper recomputes
+the support representations for each estimator and query chunk, introducing redundant computation when
+either the ensemble size or the number of query chunks is large. The model already provides a support-side
+caching path for row-axis attention, but this path is not yet used by the default chunked-inference wrapper.
+Activating support-representation caching could reduce repeated computation across query chunks.
+Support sets beyond the configured inference limit are currently subsampled. Potential future directions
+include support-side representation and KV caching, context compression, representative-context selec-
+tion, clustering-based support reduction, retrieval-based context construction, memory-efficient attention,
+and adaptive support-set sampling. These methods require systematic evaluation of the trade-offs among
+inference latency, memory consumption, support compression, and predictive performance.
+
+
+## License
+
+Two licenses apply, to two different things:
+
+- **The code in this repository** — the `exaonetabular` inference runtime — is released under the
+  [BSD-3-Clause-LG AI Research License](LICENSE), which permits commercial use.
+- **The released model weights** are licensed separately under the **EXAONE AI Model License
+  Agreement 1.1 - NC**, which limits use to non-commercial research and education. The full terms
+  ship with the weights on the [Hugging Face repository](https://huggingface.co/LG-AI-Research/EXAONE-Tabular).
+
+Installing this package therefore does not grant commercial rights to the weights it downloads.
+
+
+## Citation
+
+```
+@article{exaonetabular,
+  title={EXAONE Tabular: [PLACEHOLDER]},
+  author={{[PLACEHOLDER]}},
+  journal={[PLACEHOLDER]},
+  year={[PLACEHOLDER]}
+}
+```
+
+
+## Contact
+
+LG AI Research Technical Support: contact_us@lgresearch.ai
