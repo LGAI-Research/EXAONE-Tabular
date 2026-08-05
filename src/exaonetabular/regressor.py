@@ -73,6 +73,8 @@ class EXAONETabularRegressor:
 
         See :meth:`EXAONETabularClassifier.from_pretrained`; the only difference is
         that this loads the released regression checkpoint and its quantile head.
+        The readout and the SVD feature augmentation are pinned by the manifest's
+        :class:`RegressionConfig`; pass ``manifest=`` to change either.
         """
         checkpoint = released_checkpoint("regression")
         base_manifest = checkpoint.manifest if manifest is None else manifest
@@ -215,6 +217,7 @@ class EXAONETabularRegressor:
             members=members,
             seed=self.manifest.runtime.seed,
             task="regression",
+            n_svd=self.manifest.regression.n_svd,
         )
         batch_xs, batch_y, batch_xq, _fitted_plan = build_ensemble_inputs(
             xs, ys, xq, plan

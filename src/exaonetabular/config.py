@@ -194,16 +194,22 @@ class RuntimeConfig(_StrictMappingValue):
 
 @dataclass(frozen=True, kw_only=True)
 class RegressionConfig(_StrictMappingValue):
-    """Architecture values specific to quantile regression inference."""
+    """Architecture and readout values specific to quantile regression inference."""
 
     quantile_count: int = 999
     decoder_hidden_width: int = 384
     fixed_head_scale: float = 0.43
     point_estimate: str = "trimmed"
+    # SVD components appended to every ensemble member's features; 0 disables the
+    # augmentation and leaves the model's input at the preprocessed width.
+    n_svd: int = 16
 
     def __post_init__(self) -> None:
         if self.point_estimate not in ("median", "trimmed"):
             raise ValueError("point_estimate must be 'median' or 'trimmed'")
+        _check_int("n_svd", self.n_svd)
+        if self.n_svd < 0:
+            raise ValueError("n_svd must be non-negative")
         _check_positive_int("quantile_count", self.quantile_count)
         if self.quantile_count < 3 or self.quantile_count % 2 == 0:
             raise ValueError("quantile_count must be an odd integer of at least three")
@@ -222,6 +228,8 @@ class RegressionConfig(_StrictMappingValue):
             "quantile_count": self.quantile_count,
             "decoder_hidden_width": self.decoder_hidden_width,
             "fixed_head_scale": self.fixed_head_scale,
+            "point_estimate": self.point_estimate,
+            "n_svd": self.n_svd,
         }
 
 
