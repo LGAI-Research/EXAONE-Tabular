@@ -33,7 +33,6 @@ class ClassificationModel(nn.Module):
         *,
         device: torch.device | str | None,
         dtype: torch.dtype | None,
-        learned_head_scale: bool = True,
         initial_head_scale: float = 0.43,
         output_width: int | None = None,
         decoder_hidden_width: int | None = None,
@@ -53,7 +52,6 @@ class ClassificationModel(nn.Module):
         self.label_encoder = LabelEncoder(config.width, bias=True)
         self.transformer = CrossAxisSummaryTransformer(
             config,
-            learned_head_scale=learned_head_scale,
             initial_head_scale=initial_head_scale,
             output_width=output_width,
             decoder_hidden_width=decoder_hidden_width,
@@ -376,8 +374,6 @@ class RegressionModel(ClassificationModel):
         nn.Module.__init__(self)
         self._initialize(
             config,
-            learned_head_scale=False,
-            initial_head_scale=regression.fixed_head_scale,
             output_width=regression.quantile_count,
             decoder_hidden_width=regression.decoder_hidden_width,
             device=device,
