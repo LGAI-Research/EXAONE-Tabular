@@ -129,9 +129,7 @@ def _numeric_column(
         median = ordered[(ordered.numel() - 1) // 2]
         q1, q3 = _support_quartiles(observed)
         scale = torch.clamp(q3 - q1, min=_FLOOR)
-        if regression:
-            return (support - median) / scale, (query - median) / scale
-        # Classification retains its independently validated nonlinear rule.
+
         return (
             torch.asinh((support - median) / scale),
             torch.asinh((query - median) / scale),
