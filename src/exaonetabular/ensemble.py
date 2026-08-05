@@ -25,6 +25,9 @@ class EnsemblePlan:
     members: int
     seed: int
     task: str = "classification"
+    # SVD components appended to every member's features. 0 leaves the feature
+    # width untouched; any positive value widens the model's input by that much.
+    n_svd: int = 0
     feature_permutations: torch.Tensor | None = None
     class_permutations: torch.Tensor | None = None
     class_count: int | None = None
@@ -34,10 +37,14 @@ class EnsemblePlan:
             raise TypeError("members must be an integer")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an integer")
+        if isinstance(self.n_svd, bool) or not isinstance(self.n_svd, int):
+            raise TypeError("n_svd must be an integer")
         if self.members < 1:
             raise ValueError("members must be positive")
         if not 0 <= self.seed <= 2**63 - 1:
             raise ValueError("seed is outside the supported range")
+        if self.n_svd < 0:
+            raise ValueError("n_svd must be non-negative")
         if self.task not in {"classification", "regression"}:
             raise ValueError("task must be classification or regression")
 
@@ -253,6 +260,48 @@ def _categorical_column(
     return support_result, query_result, assignment
 
 
+def _append_svd_components(
+    support: torch.Tensor, query: torch.Tensor, n_svd: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Append the support's top-``n_svd`` SVD projections as z-normed columns.
+
+    Missing values stand in as zero, which is already the center of the
+    standardized columns, so imputation does not pull the basis.  The query is
+    projected onto the support's basis rather than its own.  A support with
+    fewer than ``n_svd`` components is zero-padded, fixing the width at
+    ``D + n_svd`` regardless of rank.
+    """
+    filled_support = torch.nan_to_num(support, nan=0.0).to(torch.float32)
+    filled_query = torch.nan_to_num(query, nan=0.0).to(torch.float32)
+    components = min(n_svd, min(support.shape))
+    if components > 0:
+        # full_matrices=False makes Vh (rank, D); its leading rows are the basis.
+        basis = torch.linalg.svd(filled_support, full_matrices=False).Vh[:components]
+        support_projection = filled_support @ basis.transpose(0, 1)
+        query_projection = filled_query @ basis.transpose(0, 1)
+        center = support_projection.mean(dim=0)
+        scale = torch.clamp(support_projection.std(dim=0, correction=0), min=_FLOOR)
+        support_projection = ((support_projection - center) / scale).to(support.dtype)
+        query_projection = ((query_projection - center) / scale).to(query.dtype)
+    else:
+        support_projection = support.new_zeros((support.shape[0], 0))
+        query_projection = query.new_zeros((query.shape[0], 0))
+    padding = n_svd - components
+    if padding:
+        support_projection = torch.cat(
+            (support_projection, support_projection.new_zeros((support.shape[0], padding))),
+            dim=1,
+        )
+        query_projection = torch.cat(
+            (query_projection, query_projection.new_zeros((query.shape[0], padding))),
+            dim=1,
+        )
+    return (
+        torch.cat((support, support_projection), dim=1),
+        torch.cat((query, query_projection), dim=1),
+    )
+
+
 def _random_permutation(
     width: int,
     *,
@@ -410,8 +459,16 @@ def build_ensemble_inputs(
                     if rule in (1, 2):
                         numeric_transform_cache[cache_key] = transformed
                 support_member[:, column], query_member[:, column] = transformed
+        # Every member is transformed differently, so its basis differs too; that
+        # is the diversity this buys over one projection shared by all members.
+        if plan.n_svd:
+            support_member, query_member = _append_svd_components(
+                support_member, query_member, plan.n_svd
+            )
+        # Permute the augmented width, not the input width: the appended columns
+        # have to be ordered with the rest, and a short permutation would drop them.
         feature_order = torch.randperm(
-            x_support.shape[1], dtype=torch.int64, device=device, generator=generator
+            support_member.shape[1], dtype=torch.int64, device=device, generator=generator
         )
         if plan.task == "regression":
             encoded_labels = y_support.clone()
