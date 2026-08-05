@@ -199,8 +199,11 @@ class RegressionConfig(_StrictMappingValue):
     quantile_count: int = 999
     decoder_hidden_width: int = 384
     fixed_head_scale: float = 0.43
+    point_estimate: str = "trimmed"
 
     def __post_init__(self) -> None:
+        if self.point_estimate not in ("median", "trimmed"):
+            raise ValueError("point_estimate must be 'median' or 'trimmed'")
         _check_positive_int("quantile_count", self.quantile_count)
         if self.quantile_count < 3 or self.quantile_count % 2 == 0:
             raise ValueError("quantile_count must be an odd integer of at least three")

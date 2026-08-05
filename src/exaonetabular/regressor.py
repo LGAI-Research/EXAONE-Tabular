@@ -231,10 +231,24 @@ class EXAONETabularRegressor:
             raise RuntimeError("model returned invalid regression quantiles")
 
         assert self.manifest.regression is not None
-        median_index = self.manifest.regression.quantile_count // 2
-        # Slice before widening so the unused 998 quantiles are not copied to
-        # float32 after the memory-planned model execution has completed.
-        member_predictions = output[..., median_index].float()
+        if self.manifest.regression.point_estimate == "trimmed":
+            # Central 99.8% trapezoidal mean over the quantile function:
+            #   [Q(.001)/2 + sum_{i=2..N-1} Q(.001i) + Q(.999)/2] / (N-1)
+            # RMSE targets the conditional mean, which the median misses on
+            # skewed targets; halving the endpoints keeps the extreme quantiles
+            # from dominating. Sorting guards against tau-crossing.
+            quantiles = torch.sort(output.float(), dim=-1).values
+            count = quantiles.shape[-1]
+            member_predictions = (
+                0.5 * quantiles[..., 0]
+                + quantiles[..., 1:-1].sum(dim=-1)
+                + 0.5 * quantiles[..., -1]
+            ) / (count - 1)
+        else:
+            median_index = self.manifest.regression.quantile_count // 2
+            # Slice before widening so the unused 998 quantiles are not copied to
+            # float32 after the memory-planned model execution has completed.
+            member_predictions = output[..., median_index].float()
         member_predictions = (
             member_predictions * state["scale"] + state["center"]
         )
