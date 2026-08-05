@@ -42,7 +42,6 @@ def _regression_config() -> RegressionConfig:
     return RegressionConfig(
         quantile_count=9,
         decoder_hidden_width=12,
-        fixed_head_scale=0.43,
     )
 
 
@@ -195,7 +194,6 @@ def test_output_memory_coefficients_are_task_neutral() -> None:
     regression = RegressionConfig(
         quantile_count=9,
         decoder_hidden_width=12,
-        fixed_head_scale=0.43,
     )
     classifier = ClassificationModel(common_model)
     regressor = RegressionModel(common_model, regression)

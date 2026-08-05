@@ -50,9 +50,7 @@ A technical report will follow.
 - Feature-attention operations per layer: 2
 - Feature-level summary tokens: 3
 - Row-level summary tokens: 32
-- Attention normalization
-  - Classification: SSMax
-  - Regression: SSMax with fixed coefficient
+- Attention normalization: SSMax
 - Total parameters
   - Classification: 20,807,866 (≈20.8M)
   - Regression: 21,110,247 (≈21.1M)
