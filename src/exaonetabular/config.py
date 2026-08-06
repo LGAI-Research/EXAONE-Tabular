@@ -58,6 +58,16 @@ def _check_choice(name: str, value: Any, allowed: frozenset[str]) -> None:
         raise ValueError(f"unsupported {name}: {value!r}")
 
 
+def _check_unit_fraction(name: str, value: Any) -> float:
+    """Validate a real scalar in [0, 1] and return it coerced to float."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} must be a real scalar")
+    fraction = float(value)
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")
+    return fraction
+
+
 @dataclass(frozen=True, kw_only=True)
 class ModelConfig(_StrictMappingValue):
     width: int = 192
@@ -194,31 +204,74 @@ class RuntimeConfig(_StrictMappingValue):
 
 @dataclass(frozen=True, kw_only=True)
 class RegressionConfig(_StrictMappingValue):
-    """Architecture values specific to quantile regression inference."""
+    """Architecture and readout values specific to quantile regression inference."""
 
     quantile_count: int = 999
     decoder_hidden_width: int = 384
-    fixed_head_scale: float = 0.43
+    point_estimate: str = "trimmed"
+    # SVD components appended to every ensemble member's features; 0 disables the
+    # augmentation and leaves the model's input at the preprocessed width.
+    n_svd: int = 16
+    # Withhold the augmentation from small, narrow, all-numeric tables, where a
+    # near-full-rank SVD only restates the input. Off by default because the split
+    # below already prices the augmentation by weight, making an all-or-nothing
+    # exemption redundant; turn it on to run the gated arm instead.
+    svd_gate: bool = False
+    # Run two ensembles -- one un-augmented, one at n_svd -- and pool their members
+    # into a single prediction, so the weight fit arbitrates between the two views.
+    # Doubles members and forwards, at predict as well as fit.
+    svd_split: bool = True
+    # How the members' point predictions are combined. "nnls" fits non-negative
+    # weights against a held-out slice of the support set; "uniform" averages.
+    member_weighting: str = "nnls"
+    # Blend toward the uniform 1/E. NNLS on a small validation split is sparse
+    # enough to drop members outright, and this bounds how far it may stray.
+    nnls_shrinkage: float = 0.75
+    nnls_validation_fraction: float = 0.2
+    # Held-out rows the fit must see before its weights are trusted; anything
+    # smaller stays on the uniform mean. Fitting a handful of weights against a
+    # few dozen rows is the regime where the solve collapses to all-zero.
+    nnls_min_validation_rows: int = 2000
 
     def __post_init__(self) -> None:
+        if self.point_estimate not in ("median", "trimmed"):
+            raise ValueError("point_estimate must be 'median' or 'trimmed'")
+        if self.member_weighting not in ("uniform", "nnls"):
+            raise ValueError("member_weighting must be 'uniform' or 'nnls'")
+        object.__setattr__(
+            self,
+            "nnls_shrinkage",
+            _check_unit_fraction("nnls_shrinkage", self.nnls_shrinkage),
+        )
+        fraction = _check_unit_fraction(
+            "nnls_validation_fraction", self.nnls_validation_fraction
+        )
+        if not 0.0 < fraction < 1.0:
+            raise ValueError("nnls_validation_fraction must lie in (0, 1)")
+        object.__setattr__(self, "nnls_validation_fraction", fraction)
+        _check_positive_int("nnls_min_validation_rows", self.nnls_min_validation_rows)
+        _check_int("n_svd", self.n_svd)
+        if self.n_svd < 0:
+            raise ValueError("n_svd must be non-negative")
+        _check_bool("svd_gate", self.svd_gate)
+        _check_bool("svd_split", self.svd_split)
         _check_positive_int("quantile_count", self.quantile_count)
         if self.quantile_count < 3 or self.quantile_count % 2 == 0:
             raise ValueError("quantile_count must be an odd integer of at least three")
         _check_positive_int("decoder_hidden_width", self.decoder_hidden_width)
-        if isinstance(self.fixed_head_scale, bool) or not isinstance(
-            self.fixed_head_scale, numbers.Real
-        ):
-            raise TypeError("fixed_head_scale must be a real scalar")
-        scale = float(self.fixed_head_scale)
-        if not math.isfinite(scale) or scale <= 0:
-            raise ValueError("fixed_head_scale must be finite and positive")
-        object.__setattr__(self, "fixed_head_scale", scale)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "quantile_count": self.quantile_count,
             "decoder_hidden_width": self.decoder_hidden_width,
-            "fixed_head_scale": self.fixed_head_scale,
+            "point_estimate": self.point_estimate,
+            "n_svd": self.n_svd,
+            "svd_gate": self.svd_gate,
+            "svd_split": self.svd_split,
+            "member_weighting": self.member_weighting,
+            "nnls_shrinkage": self.nnls_shrinkage,
+            "nnls_validation_fraction": self.nnls_validation_fraction,
+            "nnls_min_validation_rows": self.nnls_min_validation_rows,
         }
 
 

@@ -28,10 +28,9 @@ that loads a released checkpoint and serves predictions through a small, scikit-
 The code here is permissively licensed; the released **weights are non-commercial** — see
 [License](#license).
 
-> **Only the classification checkpoint is available today.** The regression weights have not been
-> published yet, so `EXAONETabularRegressor.from_pretrained()` cannot fetch them —
-> `EXAONETabularClassifier` is the usable path until they land. See
-> [Available checkpoints](#available-checkpoints).
+Both checkpoints are released: `EXAONETabularClassifier` and `EXAONETabularRegressor` each fetch
+their own weights with a single `from_pretrained()` call. See
+[Available checkpoints](#available-checkpoints).
 
 For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular).
 A technical report will follow.
@@ -51,11 +50,10 @@ A technical report will follow.
 - Feature-attention operations per layer: 2
 - Feature-level summary tokens: 3
 - Row-level summary tokens: 32
-- Attention normalization
-  - Classification: SSMax
-  - Regression: SSMax with fixed coefficient
+- Attention normalization: SSMax
 - Total parameters
   - Classification: 20,807,866 (≈20.8M)
+  - Regression: 21,110,247 (≈21.1M)
 
 </div>
 
@@ -224,14 +222,15 @@ print(exaonetabular.__version__)
 ## Quickstart
 
 EXAONE Tabular ships as **scikit-learn-style estimators**. `EXAONETabularClassifier` and
-`EXAONETabularRegressor` expose the familiar `fit` / `predict` / `predict_proba` surface, return
-`self` from `fit`, and set the usual fitted attributes — `classes_`, `n_classes_` and
-`n_features_in_` on the classifier, `n_features_in_` on the regressor — so they slot into the
-workflow you already use, including as the final step of a `sklearn.pipeline.Pipeline`.
+`EXAONETabularRegressor` both expose the familiar `fit` / `predict` surface, return `self` from
+`fit`, and set the usual fitted attributes — `classes_`, `n_classes_` and `n_features_in_` on the
+classifier, `n_features_in_` on the regressor — so they slot into the workflow you already use,
+including as the final step of a `sklearn.pipeline.Pipeline`. `predict_proba` is classification
+only; the regressor returns point estimates from `predict`.
 
-`from_pretrained` handles the rest in one call: it fetches the released checkpoint from the Hub,
-builds the model from its frozen manifest, and loads the weights. The repo id, revision, and
-architecture are baked into the package, so there is nothing to configure by hand.
+`from_pretrained` handles the rest in one call: it fetches that task's released checkpoint from the
+Hub, builds the model from its frozen manifest, and loads the weights. The repo id, revision, and
+architecture are baked into the package for both tasks, so there is nothing to configure by hand.
 
 Both snippets below run as written, on a stock scikit-learn dataset.
 
@@ -270,12 +269,8 @@ tables wider than the feature limit are reduced by built-in
 [**feature selection**](#feature-selection-wide-tables).
 </details>
 
-<details>
-<summary><b>Regression</b> (checkpoint not released yet)</summary>
-
-> **The regression checkpoint is not published yet.** `EXAONETabularRegressor` ships with the
-> runtime and the snippet below is its final form, but `from_pretrained()` cannot fetch weights
-> until the file lands on the Hub. Only classification is usable today.
+<details open>
+<summary><b>Regression</b></summary>
 
 ```python
 from sklearn.datasets import load_diabetes
@@ -287,11 +282,34 @@ X_train, X_test, y_train, y_test = train_test_split(
     *load_diabetes(return_X_y=True), test_size=0.25, random_state=0
 )
 
-reg = EXAONETabularRegressor.from_pretrained(device="cuda:0")
+reg = EXAONETabularRegressor.from_pretrained(device="cuda:0")   # download + verify + load
 
-reg.fit(X_train, y_train)          # y: (n,) real-valued
-y_pred = reg.predict(X_test)       # (n_samples,) — median of the predicted quantile distribution
+reg.fit(X_train, y_train)          # y: (n,) real-valued, finite — fits ensemble weights
+y_pred = reg.predict(X_test)       # (n_samples,) float64 point estimates
 ```
+
+The head predicts a **999-quantile distribution** per row, which `predict` reduces to one number:
+by default a **trimmed mean** — the trapezoidal average over the central 99.8% of the quantile
+function, sorted first so crossed quantiles cannot flip the order. That targets the conditional
+mean, which is what RMSE scores and what the median misses on skewed targets. To read the median
+quantile instead, pass a `manifest=` whose `RegressionConfig` sets `point_estimate="median"`.
+
+The ensemble members are then **weighted, not averaged**. `fit` holds out 20% of the support set,
+predicts it from the rows that remain, and solves for non-negative member weights by least squares
+(NNLS), rescaled to sum to one and blended 75/25 with the uniform `1/E`. Members whose preprocessing
+rule suits your table earn more of the vote; non-negativity keeps the result a convex combination,
+and the blend bounds how far a fit on a small split can stray from the uniform prior. This costs one
+extra forward pass inside `fit` — `predict` stays single-pass.
+
+The fit needs **2000 held-out rows** (`nnls_min_validation_rows`), so it engages from roughly 10k
+support rows up; smaller tables log a warning and stay on the uniform mean, because a handful of
+weights fitted against a few dozen rows is where the solve degenerates. Set
+`RegressionConfig.member_weighting="uniform"` to switch it off entirely.
+
+Targets are standardized against the fitted support set and the prediction is mapped back, so `y`
+needs no scaling of your own — but it must be finite; `NaN`/`inf` targets raise.
+Tables wider than **1024 columns** are narrowed by univariate `f_regression` (see
+[Feature selection](#feature-selection-wide-tables)).
 </details>
 
 > **NaNs and categoricals.** `X` must be numeric — encode string/categorical columns to numeric
@@ -359,9 +377,13 @@ load_classifier_checkpoint(CKPT, clf.model, manifest)      # validates + loads w
 ```
 
 Regression is analogous with `EXAONETabularRegressor`, `load_regressor_checkpoint`, and a
-`RegressionConfig(quantile_count=999, decoder_hidden_width=384)`. The frozen manifests the released
-estimators use live in `presets.py` and are reachable via `released_manifest("classification" |
-"regression")`.
+`RegressionConfig`. Two of its fields describe the checkpoint and must match it —
+`quantile_count=999` and `decoder_hidden_width=384` — while `point_estimate`, the `n_svd`/`svd_*`
+fields, and the `member_weighting`/`nnls_*` fields are readout and ensembling choices you can
+change without touching the weights.
+
+The frozen manifests the released estimators use live in `presets.py` and are reachable via
+`released_manifest("classification" | "regression")`.
 </details>
 
 
@@ -393,11 +415,31 @@ probability. The two are min-max normalized, averaged, and the top 100 columns a
   width; the fitted column subset is reapplied for you.
 - It costs one extra forward pass per `fit` on a wide table. A GPU is strongly recommended, and in
   this version there is **no way to disable it**.
-- Classification only. `EXAONETabularRegressor` narrows wide tables with `f_regression` instead.
+- Classification only — see below for the regressor.
 
 The configuration is frozen in `config.py` as `FEATURE_SELECTION`. It belongs to the
 architecture rather than to any one checkpoint — the scorers name the model's token layout, so
 the same settings apply to every classifier checkpoint of this architecture.
+
+**The regressor narrows differently.** `EXAONETabularRegressor` reads up to **1024 columns** and
+trims anything wider with univariate `f_regression` — an F-test against the target, so it costs no
+extra forward pass and uses no attention. It then appends **16 support-SVD components** to every
+ensemble member's features (`RegressionConfig.n_svd`), each member projecting onto its own basis,
+so the model sees the kept columns plus that augmentation.
+
+Two knobs control when that augmentation applies, both settled once in `fit` against the whole
+support:
+
+- **`svd_gate`** (default `False`) withholds it from small, narrow, all-numeric tables — fewer than
+  1000 rows *and* fewer than 10 columns *and* no categorical column — where a near-full-rank SVD
+  only restates the input. Off by default because the split below already prices the augmentation by
+  weight; set `True` to make the exemption an all-or-nothing decision instead.
+- **`svd_split`** (default `True`) runs **two** ensembles instead of one, an un-augmented pass and
+  an augmented pass, and pools their members into a single prediction so the weight fit decides how
+  much the augmentation is worth rather than the gate deciding all-or-nothing. It doubles both the
+  member count and the **forwards, at predict as well as fit**. Both passes share the run's seed, so
+  a member differs across them only by the augmentation. With nothing to contrast against — exempted
+  by the gate, or `n_svd=0` — a split run collapses back to the single pass.
 
 ### Controlling the GPU memory budget
 
@@ -493,18 +535,21 @@ Reduce the footprint instead, roughly in order of cost to accuracy:
 | File | Task | Head | Dtype | Notes |
 |---|---|---|---|---|
 | `exaone-tabular-classifier-v1_default.safetensors` | Classification | 10-class | float32 | `> class_capacity` classes handled automatically via ECOC |
-| `exaone-tabular-regressor-v1_default.safetensors`  | Regression    | Quantile / bar distribution (999) | float32 | **Not released yet.** Requires `feature_attention_repeats=2` + a `RegressionConfig` |
+| `exaone-tabular-regressor-v1_default.safetensors`  | Regression    | 999 quantiles | float32 | Read out as a trimmed mean over the quantiles; needs a `RegressionConfig` in its manifest |
 
-Only the classifier is published today; `EXAONETabularRegressor.from_pretrained()` will fail to
-download until the regression file appears in the Hub repository.
+Both live in the same Hub repository, and each estimator's `from_pretrained()` fetches its own file
+— there is no shared dual-head checkpoint, and a classifier file will not load into the regressor.
 
 Each checkpoint's architecture is **frozen** and must match its `InferenceManifest`; a mismatched
-file (wrong keys, shapes, or dtype) fails loudly at load — never silently.
+file (wrong keys, shapes, or dtype) fails loudly at load — never silently. The regression loader is
+stricter still: the file must carry a `quantile_levels` buffer in float32 that equals
+`linspace(1/1000, 999/1000, 999)` exactly, so a head of a different width or spacing is rejected
+rather than silently reinterpreted.
 
 `InferenceManifest.checkpoint_sha256` can additionally pin one exact file. The released manifests in
-`presets.py` leave it `None` until the final weights are published, so loads log a warning saying
-the bytes were not integrity-checked. Set it once the released file is fixed, and a checkpoint whose
-digest differs is rejected.
+`presets.py` leave it `None`, so **every load — both tasks — logs a warning** saying the bytes were
+not integrity-checked; the structural validation above still runs. Set it to pin one exact byte
+stream, and a checkpoint whose digest differs is rejected.
 
 
 ## Intended use

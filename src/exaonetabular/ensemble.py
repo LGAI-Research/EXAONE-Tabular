@@ -1,10 +1,15 @@
 """Deterministic test-time ensembles for tabular inference."""
 
 from dataclasses import dataclass, replace
+import logging
 import math
 
+import numpy as np
 import torch
+from sklearn.linear_model import LinearRegression
 
+
+_logger = logging.getLogger(__name__)
 
 _FLOAT_DTYPES = (torch.float32, torch.float64)
 _LOGIT_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -25,6 +30,12 @@ class EnsemblePlan:
     members: int
     seed: int
     task: str = "classification"
+    # SVD components appended to every member's features, already resolved by the
+    # caller: 0 leaves the feature width untouched, any positive value widens the
+    # model's input by that much. The small-table exemption (:func:`_svd_applies`)
+    # is the estimator's call, decided once against the fitted support -- deciding
+    # it here would re-derive it from whatever subset each build happens to get.
+    n_svd: int = 0
     feature_permutations: torch.Tensor | None = None
     class_permutations: torch.Tensor | None = None
     class_count: int | None = None
@@ -34,10 +45,14 @@ class EnsemblePlan:
             raise TypeError("members must be an integer")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise TypeError("seed must be an integer")
+        if isinstance(self.n_svd, bool) or not isinstance(self.n_svd, int):
+            raise TypeError("n_svd must be an integer")
         if self.members < 1:
             raise ValueError("members must be positive")
         if not 0 <= self.seed <= 2**63 - 1:
             raise ValueError("seed is outside the supported range")
+        if self.n_svd < 0:
+            raise ValueError("n_svd must be non-negative")
         if self.task not in {"classification", "regression"}:
             raise ValueError("task must be classification or regression")
 
@@ -129,9 +144,7 @@ def _numeric_column(
         median = ordered[(ordered.numel() - 1) // 2]
         q1, q3 = _support_quartiles(observed)
         scale = torch.clamp(q3 - q1, min=_FLOOR)
-        if regression:
-            return (support - median) / scale, (query - median) / scale
-        # Classification retains its independently validated nonlinear rule.
+
         return (
             torch.asinh((support - median) / scale),
             torch.asinh((query - median) / scale),
@@ -255,6 +268,64 @@ def _categorical_column(
     return support_result, query_result, assignment
 
 
+def _classify_columns(x_support: torch.Tensor) -> tuple[list[int], list[int]]:
+    """Split column indices into categorical and numeric by distinct-value count."""
+    category_columns: list[int] = []
+    numeric_columns: list[int] = []
+    for column in range(x_support.shape[1]):
+        observed = x_support[:, column][~torch.isnan(x_support[:, column])]
+        target = category_columns if torch.unique(observed).numel() < 10 else numeric_columns
+        target.append(column)
+    return category_columns, numeric_columns
+
+
+def _svd_applies(rows: int, columns: int, has_categorical: bool) -> bool:
+    """Exempt small all-numeric tables: a full-rank SVD only restates the input."""
+    return not (rows < 1000 and columns < 10 and not has_categorical)
+
+
+def _append_svd_components(
+    support: torch.Tensor, query: torch.Tensor, n_svd: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Append the support's top-``n_svd`` SVD projections as z-normed columns.
+
+    Missing values stand in as zero, which is already the center of the
+    standardized columns, so imputation does not pull the basis.  The query is
+    projected onto the support's basis rather than its own.  A support with
+    fewer than ``n_svd`` components is zero-padded, fixing the width at
+    ``D + n_svd`` regardless of rank.
+    """
+    filled_support = torch.nan_to_num(support, nan=0.0).to(torch.float32)
+    filled_query = torch.nan_to_num(query, nan=0.0).to(torch.float32)
+    components = min(n_svd, min(support.shape))
+    if components > 0:
+        # full_matrices=False makes Vh (rank, D); its leading rows are the basis.
+        basis = torch.linalg.svd(filled_support, full_matrices=False).Vh[:components]
+        support_projection = filled_support @ basis.transpose(0, 1)
+        query_projection = filled_query @ basis.transpose(0, 1)
+        center = support_projection.mean(dim=0)
+        scale = torch.clamp(support_projection.std(dim=0, correction=0), min=_FLOOR)
+        support_projection = ((support_projection - center) / scale).to(support.dtype)
+        query_projection = ((query_projection - center) / scale).to(query.dtype)
+    else:
+        support_projection = support.new_zeros((support.shape[0], 0))
+        query_projection = query.new_zeros((query.shape[0], 0))
+    padding = n_svd - components
+    if padding:
+        support_projection = torch.cat(
+            (support_projection, support_projection.new_zeros((support.shape[0], padding))),
+            dim=1,
+        )
+        query_projection = torch.cat(
+            (query_projection, query_projection.new_zeros((query.shape[0], padding))),
+            dim=1,
+        )
+    return (
+        torch.cat((support, support_projection), dim=1),
+        torch.cat((query, query_projection), dim=1),
+    )
+
+
 def _random_permutation(
     width: int,
     *,
@@ -351,12 +422,7 @@ def build_ensemble_inputs(
     device = x_support.device
     generator = torch.Generator(device=device)
     generator.manual_seed(plan.seed)
-    category_columns = []
-    numeric_columns = []
-    for column in range(x_support.shape[1]):
-        observed = x_support[:, column][~torch.isnan(x_support[:, column])]
-        target = category_columns if torch.unique(observed).numel() < 10 else numeric_columns
-        target.append(column)
+    category_columns, numeric_columns = _classify_columns(x_support)
 
     support_members = []
     query_members = []
@@ -412,8 +478,16 @@ def build_ensemble_inputs(
                     if rule in (1, 2):
                         numeric_transform_cache[cache_key] = transformed
                 support_member[:, column], query_member[:, column] = transformed
+        # Every member is transformed differently, so its basis differs too; that
+        # is the diversity this buys over one projection shared by all members.
+        if plan.n_svd:
+            support_member, query_member = _append_svd_components(
+                support_member, query_member, plan.n_svd
+            )
+        # Permute the augmented width, not the input width: the appended columns
+        # have to be ordered with the rest, and a short permutation would drop them.
         feature_order = torch.randperm(
-            x_support.shape[1], dtype=torch.int64, device=device, generator=generator
+            support_member.shape[1], dtype=torch.int64, device=device, generator=generator
         )
         if plan.task == "regression":
             encoded_labels = y_support.clone()
@@ -518,3 +592,53 @@ def aggregate_probabilities(
     if decoded.dtype in (torch.float16, torch.bfloat16):
         decoded = decoded.to(torch.float32)
     return torch.softmax(decoded.mean(dim=0), dim=1)
+
+
+def fit_member_weights(
+    member_predictions: np.ndarray, targets: np.ndarray, *, shrinkage: float
+) -> np.ndarray:
+    """Fit ensemble weights against held-out targets, then shrink toward uniform.
+
+    Solves ``min_w ||P^T w - y||`` subject to ``w >= 0`` and rescales the solution
+    to sum to one, so the aggregate stays a convex combination of members -- an
+    interpolation, never an extrapolation.  Unconstrained least squares on members
+    this correlated would return large cancelling coefficients from a validation
+    split of a few dozen rows; non-negativity is what keeps the fit usable there.
+
+    Both arguments must already be on the original target scale.
+    """
+    if not isinstance(member_predictions, np.ndarray) or not isinstance(targets, np.ndarray):
+        raise TypeError("member predictions and targets must be NumPy arrays")
+    if member_predictions.ndim != 2 or targets.ndim != 1:
+        raise ValueError("member predictions must be rank two and targets rank one")
+    if member_predictions.shape[1] != targets.shape[0]:
+        raise ValueError("member predictions and targets have different lengths")
+    if member_predictions.shape[0] == 0 or targets.shape[0] == 0:
+        raise ValueError("empty data axes are unsupported")
+    if isinstance(shrinkage, bool) or not isinstance(shrinkage, float):
+        raise TypeError("shrinkage must be a float")
+    if not math.isfinite(shrinkage) or not 0.0 <= shrinkage <= 1.0:
+        raise ValueError("shrinkage must lie in [0, 1]")
+    design = np.asarray(member_predictions, dtype=np.float64).T
+    observed = np.asarray(targets, dtype=np.float64)
+    if not np.isfinite(design).all() or not np.isfinite(observed).all():
+        raise ValueError("member predictions and targets must be finite")
+
+    members = design.shape[1]
+    uniform = np.full(members, 1.0 / members, dtype=np.float64)
+    # positive=True dispatches to scipy.optimize.nnls for a single target, so this
+    # is the NNLS solve without taking a direct dependency on scipy.
+    solver = LinearRegression(positive=True, fit_intercept=False)
+    solver.fit(design, observed)
+    weights = np.asarray(solver.coef_, dtype=np.float64)
+    if not np.isfinite(weights).all() or bool((weights < 0.0).any()):
+        raise RuntimeError("non-negative least squares returned an invalid solution")
+    total = float(weights.sum())
+    if total <= 1e-9:
+        _logger.warning(
+            "non-negative least squares zeroed every ensemble member "
+            "(weight sum %.3e); falling back to uniform weights",
+            total,
+        )
+        return uniform
+    return shrinkage * (weights / total) + (1.0 - shrinkage) * uniform
