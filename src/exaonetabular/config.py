@@ -208,7 +208,6 @@ class RegressionConfig(_StrictMappingValue):
 
     quantile_count: int = 999
     decoder_hidden_width: int = 384
-    fixed_head_scale: float = 0.43
     point_estimate: str = "trimmed"
     # SVD components appended to every ensemble member's features; 0 disables the
     # augmentation and leaves the model's input at the preprocessed width.
@@ -249,20 +248,10 @@ class RegressionConfig(_StrictMappingValue):
         if self.quantile_count < 3 or self.quantile_count % 2 == 0:
             raise ValueError("quantile_count must be an odd integer of at least three")
         _check_positive_int("decoder_hidden_width", self.decoder_hidden_width)
-        if isinstance(self.fixed_head_scale, bool) or not isinstance(
-            self.fixed_head_scale, numbers.Real
-        ):
-            raise TypeError("fixed_head_scale must be a real scalar")
-        scale = float(self.fixed_head_scale)
-        if not math.isfinite(scale) or scale <= 0:
-            raise ValueError("fixed_head_scale must be finite and positive")
-        object.__setattr__(self, "fixed_head_scale", scale)
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "quantile_count": self.quantile_count,
             "decoder_hidden_width": self.decoder_hidden_width,
-            "fixed_head_scale": self.fixed_head_scale,
             "point_estimate": self.point_estimate,
             "n_svd": self.n_svd,
             "member_weighting": self.member_weighting,
