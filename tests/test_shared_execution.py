@@ -42,6 +42,9 @@ def _regression_config() -> RegressionConfig:
     return RegressionConfig(
         quantile_count=9,
         decoder_hidden_width=12,
+        # These tests count forwards and query chunks; the default split would
+        # double both. Ensembling is covered in test_svd_augmentation_gate.
+        svd_split=False,
     )
 
 

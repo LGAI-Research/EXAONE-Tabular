@@ -201,10 +201,10 @@ class EXAONETabularRegressor:
         """Run one ensemble forward, returning (members, rows) point predictions.
 
         The plan is rebuilt identically for weight fitting and for prediction:
-        member m must denote the same preprocessing rule in both passes, or a
-        fitted weight lands on a member it was never fitted against. ``n_svd`` is
-        the width :meth:`fit` resolved against the whole support, so a pass over a
-        subset cannot land in a different geometry.
+        member m must denote the same preprocessing rule in both, or a fitted
+        weight lands on a member it was never fitted against. ``n_svd`` is settled
+        by :meth:`fit` and carried in the fitted state, so a pass over a subset of
+        the support cannot land in a different geometry.
         """
         plan = EnsemblePlan(
             members=self.manifest.runtime.ensemble_count,
@@ -220,6 +220,36 @@ class EXAONETabularRegressor:
             output = self._forward_chunked(batch_xs, batch_y, batch_xq)
         return self._collapse_members(output, query_x.shape[0])
 
+    def _ensemble_passes(self, n_svd: int) -> tuple[int, ...]:
+        """The augmentation widths whose members pool into one prediction.
+
+        A split run pairs an un-augmented pass with an augmented one and leaves it
+        to the weight fit to say how much the augmentation is worth, rather than
+        the gate deciding all-or-nothing. Both passes share the run's seed, so a
+        member differs across them only by the augmentation. It needs one to
+        contrast against, so an exempted or disabled width collapses to one pass.
+        """
+        assert self.manifest.regression is not None
+        if self.manifest.regression.svd_split and n_svd:
+            return (0, n_svd)
+        return (n_svd,)
+
+    def _pooled_member_points(
+        self,
+        support_x: torch.Tensor,
+        support_y: torch.Tensor,
+        query_x: torch.Tensor,
+        passes: tuple[int, ...],
+    ) -> torch.Tensor:
+        """Concatenate every pass's members along the member axis."""
+        return torch.cat(
+            [
+                self._member_points(support_x, support_y, query_x, n_svd=n_svd)
+                for n_svd in passes
+            ],
+            dim=0,
+        )
+
     def _nnls_member_weights(
         self,
         support_x: np.ndarray,
@@ -228,7 +258,7 @@ class EXAONETabularRegressor:
         *,
         center: float,
         scale: float,
-        n_svd: int,
+        passes: tuple[int, ...],
     ) -> np.ndarray | None:
         """Weight members by their accuracy on a held-out slice of the support.
 
@@ -255,11 +285,11 @@ class EXAONETabularRegressor:
             return None
         order = np.random.RandomState(_VALIDATION_SPLIT_SEED).permutation(rows)
         validation, fitting = order[:held_out], order[held_out:]
-        points = self._member_points(
+        points = self._pooled_member_points(
             torch.as_tensor(support_x[fitting], dtype=torch.float32, device=self.device),
             torch.as_tensor(support_y[fitting], dtype=torch.float32, device=self.device),
             torch.as_tensor(support_x[validation], dtype=torch.float32, device=self.device),
-            n_svd=n_svd,
+            passes,
         )
         # NNLS fits on the original target scale, matching the de-normalized
         # predictions that prediction ultimately combines.
@@ -314,18 +344,20 @@ class EXAONETabularRegressor:
         # Settle the augmentation once, against the whole support. Every later
         # ensemble build reuses the width rather than re-deriving the exemption
         # from the rows it happens to be handed.
-        categorical, _numeric = _classify_columns(torch.from_numpy(support_x))
-        n_svd = (
-            self.manifest.regression.n_svd
-            if _svd_applies(support_x.shape[0], support_x.shape[1], bool(categorical))
-            else 0
-        )
+        n_svd = self.manifest.regression.n_svd
+        if n_svd and self.manifest.regression.svd_gate:
+            categorical, _numeric = _classify_columns(torch.from_numpy(support_x))
+            if not _svd_applies(
+                support_x.shape[0], support_x.shape[1], bool(categorical)
+            ):
+                n_svd = 0
+        passes = self._ensemble_passes(n_svd)
         # Fit the weights here rather than at prediction: the split needs only the
         # support, so paying the extra forward once keeps predict single-pass.
         weights = None
         if self.manifest.regression.member_weighting == "nnls":
             weights = self._nnls_member_weights(
-                support_x, support_y, y[chosen], center=center, scale=scale, n_svd=n_svd
+                support_x, support_y, y[chosen], center=center, scale=scale, passes=passes
             )
         self._fitted_state = {
             "preprocessor": preprocessor,
@@ -335,6 +367,7 @@ class EXAONETabularRegressor:
             "center": center,
             "scale": scale,
             "n_svd": n_svd,
+            "passes": passes,
             "member_weights": weights,
         }
         return self
@@ -349,11 +382,11 @@ class EXAONETabularRegressor:
         if query.shape[0] == 0:
             return np.empty(0, dtype=np.float64)
 
-        member_predictions = self._member_points(
+        member_predictions = self._pooled_member_points(
             torch.as_tensor(state["support_x"], dtype=torch.float32, device=self.device),
             torch.as_tensor(state["support_y"], dtype=torch.float32, device=self.device),
             torch.as_tensor(query, dtype=torch.float32, device=self.device),
-            n_svd=state["n_svd"],
+            state["passes"],
         )
         member_predictions = (
             member_predictions * state["scale"] + state["center"]
