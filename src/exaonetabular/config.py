@@ -212,6 +212,15 @@ class RegressionConfig(_StrictMappingValue):
     # SVD components appended to every ensemble member's features; 0 disables the
     # augmentation and leaves the model's input at the preprocessed width.
     n_svd: int = 16
+    # Withhold the augmentation from small, narrow, all-numeric tables, where a
+    # near-full-rank SVD only restates the input. Off by default because the split
+    # below already prices the augmentation by weight, making an all-or-nothing
+    # exemption redundant; turn it on to run the gated arm instead.
+    svd_gate: bool = False
+    # Run two ensembles -- one un-augmented, one at n_svd -- and pool their members
+    # into a single prediction, so the weight fit arbitrates between the two views.
+    # Doubles members and forwards, at predict as well as fit.
+    svd_split: bool = True
     # How the members' point predictions are combined. "nnls" fits non-negative
     # weights against a held-out slice of the support set; "uniform" averages.
     member_weighting: str = "nnls"
@@ -244,16 +253,21 @@ class RegressionConfig(_StrictMappingValue):
         _check_int("n_svd", self.n_svd)
         if self.n_svd < 0:
             raise ValueError("n_svd must be non-negative")
+        _check_bool("svd_gate", self.svd_gate)
+        _check_bool("svd_split", self.svd_split)
         _check_positive_int("quantile_count", self.quantile_count)
         if self.quantile_count < 3 or self.quantile_count % 2 == 0:
             raise ValueError("quantile_count must be an odd integer of at least three")
         _check_positive_int("decoder_hidden_width", self.decoder_hidden_width)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "quantile_count": self.quantile_count,
             "decoder_hidden_width": self.decoder_hidden_width,
             "point_estimate": self.point_estimate,
             "n_svd": self.n_svd,
+            "svd_gate": self.svd_gate,
+            "svd_split": self.svd_split,
             "member_weighting": self.member_weighting,
             "nnls_shrinkage": self.nnls_shrinkage,
             "nnls_validation_fraction": self.nnls_validation_fraction,

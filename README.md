@@ -378,9 +378,9 @@ load_classifier_checkpoint(CKPT, clf.model, manifest)      # validates + loads w
 
 Regression is analogous with `EXAONETabularRegressor`, `load_regressor_checkpoint`, and a
 `RegressionConfig`. Two of its fields describe the checkpoint and must match it —
-`quantile_count=999` and `decoder_hidden_width=384` — while `point_estimate`, `n_svd`, and the
-`member_weighting`/`nnls_*` fields are readout and ensembling choices you can change without
-touching the weights.
+`quantile_count=999` and `decoder_hidden_width=384` — while `point_estimate`, the `n_svd`/`svd_*`
+fields, and the `member_weighting`/`nnls_*` fields are readout and ensembling choices you can
+change without touching the weights.
 
 The frozen manifests the released estimators use live in `presets.py` and are reachable via
 `released_manifest("classification" | "regression")`.
@@ -426,6 +426,20 @@ trims anything wider with univariate `f_regression` — an F-test against the ta
 extra forward pass and uses no attention. It then appends **16 support-SVD components** to every
 ensemble member's features (`RegressionConfig.n_svd`), each member projecting onto its own basis,
 so the model sees the kept columns plus that augmentation.
+
+Two knobs control when that augmentation applies, both settled once in `fit` against the whole
+support:
+
+- **`svd_gate`** (default `False`) withholds it from small, narrow, all-numeric tables — fewer than
+  1000 rows *and* fewer than 10 columns *and* no categorical column — where a near-full-rank SVD
+  only restates the input. Off by default because the split below already prices the augmentation by
+  weight; set `True` to make the exemption an all-or-nothing decision instead.
+- **`svd_split`** (default `True`) runs **two** ensembles instead of one, an un-augmented pass and
+  an augmented pass, and pools their members into a single prediction so the weight fit decides how
+  much the augmentation is worth rather than the gate deciding all-or-nothing. It doubles both the
+  member count and the **forwards, at predict as well as fit**. Both passes share the run's seed, so
+  a member differs across them only by the augmentation. With nothing to contrast against — exempted
+  by the gate, or `n_svd=0` — a split run collapses back to the single pass.
 
 ### Controlling the GPU memory budget
 
