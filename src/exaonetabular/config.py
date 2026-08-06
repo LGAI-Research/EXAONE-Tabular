@@ -212,7 +212,7 @@ class ClassificationConfig(_StrictMappingValue):
     # regression this is unconditional -- there is no small-table exemption and no
     # un-augmented arm to fall back on, because probability aggregation averages
     # members rather than weighting them, so it has no way to price a second view.
-    n_svd: int = 8
+    n_svd: int = 0
 
     def __post_init__(self) -> None:
         _check_int("n_svd", self.n_svd)
