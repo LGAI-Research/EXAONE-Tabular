@@ -369,9 +369,11 @@ class EXAONETabularClassifier:
         x_support = torch.as_tensor(support_x, dtype=torch.float32, device=self.device)
         y_support = torch.as_tensor(support_y, dtype=torch.float32, device=self.device)
         x_query = torch.as_tensor(query_x, dtype=torch.float32, device=self.device)
+        assert self.manifest.classification is not None
         plan = EnsemblePlan(
             members=self.manifest.runtime.ensemble_count,
             seed=self.manifest.runtime.seed,
+            n_svd=self.manifest.classification.n_svd,
         )
         ens_xs, ens_ys, ens_xq, fitted_plan = build_ensemble_inputs(
             x_support, y_support, x_query, plan
