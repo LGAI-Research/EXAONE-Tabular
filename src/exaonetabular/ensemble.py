@@ -461,7 +461,12 @@ def build_ensemble_inputs(
                 support_member[:, column], query_member[:, column] = transformed
         # Every member is transformed differently, so its basis differs too; that
         # is the diversity this buys over one projection shared by all members.
-        if plan.n_svd:
+        # Exempt small all-numeric tables: a full-rank SVD only restates the input.
+        if plan.n_svd and not (
+            x_support.shape[0] < 1000
+            and x_support.shape[1] < 10
+            and not category_columns
+        ):
             support_member, query_member = _append_svd_components(
                 support_member, query_member, plan.n_svd
             )
