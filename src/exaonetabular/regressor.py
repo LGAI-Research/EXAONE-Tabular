@@ -35,6 +35,11 @@ _DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch
 # reference recipe's permutation, which default_rng would not.
 _VALIDATION_SPLIT_SEED = 0
 
+# Seed for the augmented half of a split run, so its members differ from the
+# un-augmented half by their permutation as well as by the augmentation. The
+# value is the reference recipe's, carried over verbatim to stay comparable.
+_SVD_SPLIT_SEED = 1234567
+
 
 class EXAONETabularRegressor:
     def __init__(self, manifest: InferenceManifest, *, device: torch.device | str = "cpu", model: nn.Module | None = None, max_vram_bytes: int | None = None) -> None:
@@ -197,18 +202,19 @@ class EXAONETabularRegressor:
         query_x: torch.Tensor,
         *,
         n_svd: int,
+        seed: int,
     ) -> torch.Tensor:
         """Run one ensemble forward, returning (members, rows) point predictions.
 
         The plan is rebuilt identically for weight fitting and for prediction:
         member m must denote the same preprocessing rule in both, or a fitted
-        weight lands on a member it was never fitted against. ``n_svd`` is settled
-        by :meth:`fit` and carried in the fitted state, so a pass over a subset of
-        the support cannot land in a different geometry.
+        weight lands on a member it was never fitted against. Both ``n_svd`` and
+        ``seed`` are settled by :meth:`fit` and carried in the fitted state, so a
+        pass over a subset of the support cannot land in a different geometry.
         """
         plan = EnsemblePlan(
             members=self.manifest.runtime.ensemble_count,
-            seed=self.manifest.runtime.seed,
+            seed=seed,
             task="regression",
             n_svd=n_svd,
         )
@@ -220,32 +226,35 @@ class EXAONETabularRegressor:
             output = self._forward_chunked(batch_xs, batch_y, batch_xq)
         return self._collapse_members(output, query_x.shape[0])
 
-    def _ensemble_passes(self, n_svd: int) -> tuple[int, ...]:
-        """The augmentation widths whose members pool into one prediction.
+    def _ensemble_passes(self, n_svd: int) -> tuple[tuple[int, int], ...]:
+        """The ``(n_svd, seed)`` pairs whose members pool into one prediction.
 
         A split run pairs an un-augmented pass with an augmented one and leaves it
         to the weight fit to say how much the augmentation is worth, rather than
-        the gate deciding all-or-nothing. Both passes share the run's seed, so a
-        member differs across them only by the augmentation. It needs one to
-        contrast against, so an exempted or disabled width collapses to one pass.
+        the gate deciding all-or-nothing. The augmented half also gets its own
+        seed, so the two halves differ by permutation as well as by augmentation
+        and the fit arbitrates between genuinely distinct views. The split needs
+        an augmentation to contrast against, so an exempted or disabled width
+        collapses back to a single pass on the run's own seed.
         """
         assert self.manifest.regression is not None
+        base_seed = self.manifest.runtime.seed
         if self.manifest.regression.svd_split and n_svd:
-            return (0, n_svd)
-        return (n_svd,)
+            return ((0, base_seed), (n_svd, _SVD_SPLIT_SEED))
+        return ((n_svd, base_seed),)
 
     def _pooled_member_points(
         self,
         support_x: torch.Tensor,
         support_y: torch.Tensor,
         query_x: torch.Tensor,
-        passes: tuple[int, ...],
+        passes: tuple[tuple[int, int], ...],
     ) -> torch.Tensor:
         """Concatenate every pass's members along the member axis."""
         return torch.cat(
             [
-                self._member_points(support_x, support_y, query_x, n_svd=n_svd)
-                for n_svd in passes
+                self._member_points(support_x, support_y, query_x, n_svd=n_svd, seed=seed)
+                for n_svd, seed in passes
             ],
             dim=0,
         )
@@ -258,7 +267,7 @@ class EXAONETabularRegressor:
         *,
         center: float,
         scale: float,
-        passes: tuple[int, ...],
+        passes: tuple[tuple[int, int], ...],
     ) -> np.ndarray | None:
         """Weight members by their accuracy on a held-out slice of the support.
 

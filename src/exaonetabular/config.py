@@ -13,6 +13,7 @@ __all__ = [
     "ModelConfig",
     "PreprocessingConfig",
     "RuntimeConfig",
+    "ClassificationConfig",
     "RegressionConfig",
     "AttentionScorer",
     "FeatureSelectionConfig",
@@ -203,6 +204,26 @@ class RuntimeConfig(_StrictMappingValue):
 
 
 @dataclass(frozen=True, kw_only=True)
+class ClassificationConfig(_StrictMappingValue):
+    """Readout values specific to classification inference."""
+
+    # SVD components appended to every ensemble member's features; 0 disables the
+    # augmentation and leaves the model's input at the preprocessed width. Unlike
+    # regression this is unconditional -- there is no small-table exemption and no
+    # un-augmented arm to fall back on, because probability aggregation averages
+    # members rather than weighting them, so it has no way to price a second view.
+    n_svd: int = 8
+
+    def __post_init__(self) -> None:
+        _check_int("n_svd", self.n_svd)
+        if self.n_svd < 0:
+            raise ValueError("n_svd must be non-negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"n_svd": self.n_svd}
+
+
+@dataclass(frozen=True, kw_only=True)
 class RegressionConfig(_StrictMappingValue):
     """Architecture and readout values specific to quantile regression inference."""
 
@@ -378,6 +399,9 @@ class InferenceManifest(_StrictMappingValue):
     model: ModelConfig = field(default_factory=ModelConfig)
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    # Left None so an existing classification manifest keeps constructing unchanged;
+    # __post_init__ fills in the defaults rather than making every caller pass one.
+    classification: ClassificationConfig | None = None
     regression: RegressionConfig | None = None
 
     def __post_init__(self) -> None:
@@ -404,9 +428,15 @@ class InferenceManifest(_StrictMappingValue):
         if self.task == "classification":
             if self.regression is not None:
                 raise ValueError("classification manifests cannot declare regression config")
+            if self.classification is None:
+                object.__setattr__(self, "classification", ClassificationConfig())
+            elif not isinstance(self.classification, ClassificationConfig):
+                raise TypeError("classification must be a ClassificationConfig")
         else:
             if not isinstance(self.regression, RegressionConfig):
                 raise TypeError("regression manifests require a RegressionConfig")
+            if self.classification is not None:
+                raise ValueError("regression manifests cannot declare classification config")
 
     @property
     def output_width(self) -> int:
@@ -461,6 +491,9 @@ class InferenceManifest(_StrictMappingValue):
         if self.task == "regression":
             assert self.regression is not None
             result["regression"] = self.regression.to_dict()
+        else:
+            assert self.classification is not None
+            result["classification"] = self.classification.to_dict()
         return result
 
     @classmethod
@@ -475,6 +508,7 @@ class InferenceManifest(_StrictMappingValue):
             "model": ModelConfig,
             "preprocessing": PreprocessingConfig,
             "runtime": RuntimeConfig,
+            "classification": ClassificationConfig,
             "regression": RegressionConfig,
         }
         for name, config_type in converters.items():
