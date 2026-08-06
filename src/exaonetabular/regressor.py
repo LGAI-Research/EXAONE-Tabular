@@ -14,7 +14,13 @@ from sklearn.utils import InputTags, RegressorTags, Tags, TargetTags
 from ._execution import _InferenceExecutor
 from .checkpoint import load_regressor_checkpoint
 from .config import InferenceManifest
-from .ensemble import EnsemblePlan, build_ensemble_inputs
+from .ensemble import (
+    EnsemblePlan,
+    _classify_columns,
+    _svd_applies,
+    build_ensemble_inputs,
+    fit_member_weights,
+)
 from .model.heads import RegressionModel
 from .preprocessing import TabularPreprocessor
 from .presets import released_checkpoint
@@ -24,6 +30,10 @@ from .weights import resolve_weights
 _logger = logging.getLogger(__name__)
 
 _DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
+
+# The split is drawn with a fixed seed rather than the manifest's, matching the
+# reference recipe these weights were tuned against.
+_VALIDATION_SPLIT_SEED = 0
 
 
 class EXAONETabularRegressor:
@@ -146,6 +156,119 @@ class EXAONETabularRegressor:
             self.model, support_batch, label_batch, query_batch
         )
 
+    def _collapse_members(
+        self, output: torch.Tensor, query_count: int
+    ) -> torch.Tensor:
+        """Reduce each member's quantile bank to one point prediction per row."""
+        expected = (
+            self.manifest.runtime.ensemble_count,
+            query_count,
+            self.manifest.output_width,
+        )
+        if (
+            not isinstance(output, torch.Tensor)
+            or tuple(output.shape) != expected
+            or not bool(torch.isfinite(output).all())
+        ):
+            raise RuntimeError("model returned invalid regression quantiles")
+        assert self.manifest.regression is not None
+        if self.manifest.regression.point_estimate == "trimmed":
+            # Central 99.8% trapezoidal mean over the quantile function:
+            #   [Q(.001)/2 + sum_{i=2..N-1} Q(.001i) + Q(.999)/2] / (N-1)
+            # RMSE targets the conditional mean, which the median misses on
+            # skewed targets; halving the endpoints keeps the extreme quantiles
+            # from dominating. Sorting guards against tau-crossing.
+            quantiles = torch.sort(output.float(), dim=-1).values
+            count = quantiles.shape[-1]
+            return (
+                0.5 * quantiles[..., 0]
+                + quantiles[..., 1:-1].sum(dim=-1)
+                + 0.5 * quantiles[..., -1]
+            ) / (count - 1)
+        median_index = self.manifest.regression.quantile_count // 2
+        # Slice before widening so the unused 998 quantiles are not copied to
+        # float32 after the memory-planned model execution has completed.
+        return output[..., median_index].float()
+
+    def _member_points(
+        self,
+        support_x: torch.Tensor,
+        support_y: torch.Tensor,
+        query_x: torch.Tensor,
+        *,
+        n_svd: int,
+    ) -> torch.Tensor:
+        """Run one ensemble forward, returning (members, rows) point predictions.
+
+        The plan is rebuilt identically for weight fitting and for prediction:
+        member m must denote the same preprocessing rule in both passes, or a
+        fitted weight lands on a member it was never fitted against. ``n_svd`` is
+        the width :meth:`fit` resolved against the whole support, so a pass over a
+        subset cannot land in a different geometry.
+        """
+        plan = EnsemblePlan(
+            members=self.manifest.runtime.ensemble_count,
+            seed=self.manifest.runtime.seed,
+            task="regression",
+            n_svd=n_svd,
+        )
+        batch_xs, batch_y, batch_xq, _fitted_plan = build_ensemble_inputs(
+            support_x, support_y, query_x, plan
+        )
+        self.model.eval()
+        with torch.inference_mode():
+            output = self._forward_chunked(batch_xs, batch_y, batch_xq)
+        return self._collapse_members(output, query_x.shape[0])
+
+    def _nnls_member_weights(
+        self,
+        support_x: np.ndarray,
+        support_y: np.ndarray,
+        targets: np.ndarray,
+        *,
+        center: float,
+        scale: float,
+        n_svd: int,
+    ) -> np.ndarray | None:
+        """Weight members by their accuracy on a held-out slice of the support.
+
+        The split is taken over the in-context support rows: the held-out rows
+        are withheld from the conditioning set and predicted from the rest, so
+        the fit measures each member on rows it did not see.
+
+        Returns ``None`` when the split is too small to trust, which leaves
+        prediction on the uniform mean.
+        """
+        assert self.manifest.regression is not None
+        regression = self.manifest.regression
+        rows = support_x.shape[0]
+        held_out = int(regression.nnls_validation_fraction * rows)
+        if held_out < regression.nnls_min_validation_rows:
+            _logger.warning(
+                "support of %d rows yields %d validation rows, fewer than "
+                "nnls_min_validation_rows=%d; aggregating ensemble members with "
+                "uniform weights instead",
+                rows,
+                held_out,
+                regression.nnls_min_validation_rows,
+            )
+            return None
+        order = np.random.default_rng(_VALIDATION_SPLIT_SEED).permutation(rows)
+        validation, fitting = order[:held_out], order[held_out:]
+        points = self._member_points(
+            torch.as_tensor(support_x[fitting], dtype=torch.float32, device=self.device),
+            torch.as_tensor(support_y[fitting], dtype=torch.float32, device=self.device),
+            torch.as_tensor(support_x[validation], dtype=torch.float32, device=self.device),
+            n_svd=n_svd,
+        )
+        # NNLS fits on the original target scale, matching the de-normalized
+        # predictions that prediction ultimately combines.
+        return fit_member_weights(
+            (points.float() * scale + center).cpu().numpy(),
+            targets[validation],
+            shrinkage=regression.nnls_shrinkage,
+        )
+
     def fit(self, features: np.ndarray, targets: np.ndarray) -> "EXAONETabularRegressor":
         if not isinstance(features, np.ndarray):
             raise TypeError("features must be a NumPy array")
@@ -185,13 +308,34 @@ class EXAONETabularRegressor:
         center = float(center_tensor)
         scale = float(scale_tensor)
         transformed = (selected_y - center_tensor) / (scale_tensor + 1e-8)
+        support_x = np.array(prepared.values[chosen], copy=True)
+        support_y = transformed.numpy().copy()
+        assert self.manifest.regression is not None
+        # Settle the augmentation once, against the whole support. Every later
+        # ensemble build reuses the width rather than re-deriving the exemption
+        # from the rows it happens to be handed.
+        categorical, _numeric = _classify_columns(torch.from_numpy(support_x))
+        n_svd = (
+            self.manifest.regression.n_svd
+            if _svd_applies(support_x.shape[0], support_x.shape[1], bool(categorical))
+            else 0
+        )
+        # Fit the weights here rather than at prediction: the split needs only the
+        # support, so paying the extra forward once keeps predict single-pass.
+        weights = None
+        if self.manifest.regression.member_weighting == "nnls":
+            weights = self._nnls_member_weights(
+                support_x, support_y, y[chosen], center=center, scale=scale, n_svd=n_svd
+            )
         self._fitted_state = {
             "preprocessor": preprocessor,
             "n_features": features.shape[1],
-            "support_x": np.array(prepared.values[chosen], copy=True),
-            "support_y": transformed.numpy().copy(),
+            "support_x": support_x,
+            "support_y": support_y,
             "center": center,
             "scale": scale,
+            "n_svd": n_svd,
+            "member_weights": weights,
         }
         return self
 
@@ -205,58 +349,28 @@ class EXAONETabularRegressor:
         if query.shape[0] == 0:
             return np.empty(0, dtype=np.float64)
 
-        xs = torch.as_tensor(
-            state["support_x"], dtype=torch.float32, device=self.device
+        member_predictions = self._member_points(
+            torch.as_tensor(state["support_x"], dtype=torch.float32, device=self.device),
+            torch.as_tensor(state["support_y"], dtype=torch.float32, device=self.device),
+            torch.as_tensor(query, dtype=torch.float32, device=self.device),
+            n_svd=state["n_svd"],
         )
-        ys = torch.as_tensor(
-            state["support_y"], dtype=torch.float32, device=self.device
-        )
-        xq = torch.as_tensor(query, dtype=torch.float32, device=self.device)
-        members = self.manifest.runtime.ensemble_count
-        plan = EnsemblePlan(
-            members=members,
-            seed=self.manifest.runtime.seed,
-            task="regression",
-            n_svd=self.manifest.regression.n_svd,
-        )
-        batch_xs, batch_y, batch_xq, _fitted_plan = build_ensemble_inputs(
-            xs, ys, xq, plan
-        )
-        self.model.eval()
-        with torch.inference_mode():
-            output = self._forward_chunked(batch_xs, batch_y, batch_xq)
-        expected = (members, query.shape[0], self.manifest.output_width)
-        if (
-            not isinstance(output, torch.Tensor)
-            or tuple(output.shape) != expected
-            or not bool(torch.isfinite(output).all())
-        ):
-            raise RuntimeError("model returned invalid regression quantiles")
-
-        assert self.manifest.regression is not None
-        if self.manifest.regression.point_estimate == "trimmed":
-            # Central 99.8% trapezoidal mean over the quantile function:
-            #   [Q(.001)/2 + sum_{i=2..N-1} Q(.001i) + Q(.999)/2] / (N-1)
-            # RMSE targets the conditional mean, which the median misses on
-            # skewed targets; halving the endpoints keeps the extreme quantiles
-            # from dominating. Sorting guards against tau-crossing.
-            quantiles = torch.sort(output.float(), dim=-1).values
-            count = quantiles.shape[-1]
-            member_predictions = (
-                0.5 * quantiles[..., 0]
-                + quantiles[..., 1:-1].sum(dim=-1)
-                + 0.5 * quantiles[..., -1]
-            ) / (count - 1)
-        else:
-            median_index = self.manifest.regression.quantile_count // 2
-            # Slice before widening so the unused 998 quantiles are not copied to
-            # float32 after the memory-planned model execution has completed.
-            member_predictions = output[..., median_index].float()
         member_predictions = (
             member_predictions * state["scale"] + state["center"]
         )
-        predictions = member_predictions.mean(dim=0).cpu().numpy()
-        return np.array(predictions, dtype=np.float64, order="C", copy=True)
+        weights = state["member_weights"]
+        if weights is None:
+            combined = member_predictions.mean(dim=0)
+        else:
+            blend = torch.as_tensor(
+                weights,
+                dtype=member_predictions.dtype,
+                device=member_predictions.device,
+            )
+            combined = (blend.unsqueeze(1) * member_predictions).sum(dim=0)
+        return np.array(
+            combined.cpu().numpy(), dtype=np.float64, order="C", copy=True
+        )
 
 
 __all__ = ["EXAONETabularRegressor"]
