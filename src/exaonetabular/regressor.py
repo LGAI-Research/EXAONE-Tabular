@@ -31,8 +31,8 @@ _logger = logging.getLogger(__name__)
 
 _DTYPES = {"float32": torch.float32, "float16": torch.float16, "bfloat16": torch.bfloat16}
 
-# The split is drawn with a fixed seed rather than the manifest's, matching the
-# reference recipe these weights were tuned against.
+# Fixed seed, and legacy RandomState specifically: the split has to reproduce the
+# reference recipe's permutation, which default_rng would not.
 _VALIDATION_SPLIT_SEED = 0
 
 
@@ -253,7 +253,7 @@ class EXAONETabularRegressor:
                 regression.nnls_min_validation_rows,
             )
             return None
-        order = np.random.default_rng(_VALIDATION_SPLIT_SEED).permutation(rows)
+        order = np.random.RandomState(_VALIDATION_SPLIT_SEED).permutation(rows)
         validation, fitting = order[:held_out], order[held_out:]
         points = self._member_points(
             torch.as_tensor(support_x[fitting], dtype=torch.float32, device=self.device),
