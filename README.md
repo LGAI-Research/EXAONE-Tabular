@@ -286,7 +286,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 reg = EXAONETabularRegressor.from_pretrained(device="cuda:0")   # download + verify + load
 
-reg.fit(X_train, y_train)          # y: (n,) real-valued, finite
+reg.fit(X_train, y_train)          # y: (n,) real-valued, finite — fits ensemble weights
 y_pred = reg.predict(X_test)       # (n_samples,) float64 point estimates
 ```
 
@@ -295,6 +295,18 @@ by default a **trimmed mean** — the trapezoidal average over the central 99.8%
 function, sorted first so crossed quantiles cannot flip the order. That targets the conditional
 mean, which is what RMSE scores and what the median misses on skewed targets. To read the median
 quantile instead, pass a `manifest=` whose `RegressionConfig` sets `point_estimate="median"`.
+
+The ensemble members are then **weighted, not averaged**. `fit` holds out 20% of the support set,
+predicts it from the rows that remain, and solves for non-negative member weights by least squares
+(NNLS), rescaled to sum to one and blended 75/25 with the uniform `1/E`. Members whose preprocessing
+rule suits your table earn more of the vote; non-negativity keeps the result a convex combination,
+and the blend bounds how far a fit on a small split can stray from the uniform prior. This costs one
+extra forward pass inside `fit` — `predict` stays single-pass.
+
+The fit needs **2000 held-out rows** (`nnls_min_validation_rows`), so it engages from roughly 10k
+support rows up; smaller tables log a warning and stay on the uniform mean, because a handful of
+weights fitted against a few dozen rows is where the solve degenerates. Set
+`RegressionConfig.member_weighting="uniform"` to switch it off entirely.
 
 Targets are standardized against the fitted support set and the prediction is mapped back, so `y`
 needs no scaling of your own — but it must be finite; `NaN`/`inf` targets raise.
@@ -368,8 +380,9 @@ load_classifier_checkpoint(CKPT, clf.model, manifest)      # validates + loads w
 
 Regression is analogous with `EXAONETabularRegressor`, `load_regressor_checkpoint`, and a
 `RegressionConfig`. Two of its fields describe the checkpoint and must match it —
-`quantile_count=999` and `decoder_hidden_width=384` — while `point_estimate` and `n_svd` are
-readout and ensembling choices you can change without touching the weights.
+`quantile_count=999` and `decoder_hidden_width=384` — while `point_estimate`, `n_svd`, and the
+`member_weighting`/`nnls_*` fields are readout and ensembling choices you can change without
+touching the weights.
 
 The frozen manifests the released estimators use live in `presets.py` and are reachable via
 `released_manifest("classification" | "regression")`.
