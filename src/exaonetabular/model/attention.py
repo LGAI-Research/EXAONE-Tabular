@@ -51,7 +51,6 @@ class TensorAttention(nn.Module):
         head_count: int,
         *,
         initial_head_scale: float = 0.43,
-        learned_head_scale: bool = True,
         score_scale: float | None = None,
         sdpa_backend: str = "auto",
         device: torch.device | str | None = None,
@@ -65,8 +64,6 @@ class TensorAttention(nn.Module):
         self._check_real("initial_head_scale", initial_head_scale)
         if not math.isfinite(float(initial_head_scale)):
             raise ValueError("initial_head_scale must be finite")
-        if not isinstance(learned_head_scale, bool):
-            raise TypeError("learned_head_scale must be bool")
         if score_scale is not None:
             self._check_real("score_scale", score_scale)
             if not math.isfinite(float(score_scale)) or float(score_scale) <= 0:
@@ -93,10 +90,10 @@ class TensorAttention(nn.Module):
         self.value_weight = nn.Parameter(torch.empty((embedding_dim, embedding_dim), **factory))
         self.output_weight = nn.Parameter(torch.empty((embedding_dim, embedding_dim), **factory))
         scale = torch.full((head_count,), float(initial_head_scale), **factory)
-        if learned_head_scale:
-            self.head_scale = nn.Parameter(scale)
-        else:
-            self.register_buffer("head_scale", scale, persistent=False)
+        # EXAONE Tabular is inference-only: the per-head SSMax coefficient is
+        # persistent model state for every task, irrespective of how it was
+        # produced during training.
+        self.register_buffer("head_scale", scale)
         for weight in (
             self.query_weight,
             self.key_weight,

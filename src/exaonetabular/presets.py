@@ -74,7 +74,9 @@ _REGRESSOR = ReleasedCheckpoint(
     manifest=InferenceManifest(
         task="regression",
         model=ModelConfig(feature_attention_repeats=2),
-        runtime=RuntimeConfig(ensemble_count=8, compute_dtype="float16", seed=0),
+        runtime=RuntimeConfig(
+            ensemble_count=8, compute_dtype="float16", seed=0, feature_limit=1024
+        ),
         regression=RegressionConfig(quantile_count=999, decoder_hidden_width=384),
     ),
 )

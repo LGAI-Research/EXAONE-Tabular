@@ -63,7 +63,6 @@ class CrossAxisSummaryLayer(nn.Module):
         layer_norm_epsilon: float = 1e-5,
         final_layer: bool = False,
         initial_head_scale: float = 0.43,
-        learned_head_scale: bool = True,
         score_scale: float | None = None,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
@@ -93,8 +92,6 @@ class CrossAxisSummaryLayer(nn.Module):
                 raise ValueError(f"invalid {name}")
         if not isinstance(final_layer, bool):
             raise TypeError("final_layer must be bool")
-        if not isinstance(learned_head_scale, bool):
-            raise TypeError("learned_head_scale must be bool")
         if not isinstance(zero_residual_branches, bool):
             raise TypeError("zero_residual_branches must be bool")
         if dtype is not None and not isinstance(dtype, torch.dtype):
@@ -117,7 +114,6 @@ class CrossAxisSummaryLayer(nn.Module):
             "dim": self.width,
             "initial_head_scale": initial_head_scale,
             "head_scale": initial_head_scale,
-            "learned_head_scale": learned_head_scale,
             "score_scale": score_scale,
             # Absent from the frozen ModelConfig, so the per-call policy applies
             # unless a caller's config pins one kernel for the whole model.
