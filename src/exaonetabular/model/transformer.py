@@ -52,7 +52,6 @@ class CrossAxisSummaryTransformer(nn.Module):
         activation: str = "gelu",
         layer_norm_epsilon: float = 1e-5,
         initial_head_scale: float = 0.43,
-        learned_head_scale: bool = True,
         score_scale: float | None = None,
         output_width: int | None = None,
         decoder_hidden_width: int | None = None,
@@ -66,7 +65,6 @@ class CrossAxisSummaryTransformer(nn.Module):
             activation,
             layer_norm_epsilon,
             initial_head_scale,
-            learned_head_scale,
             score_scale,
             output_width,
             decoder_hidden_width,
@@ -82,7 +80,6 @@ class CrossAxisSummaryTransformer(nn.Module):
                 activation=activation,
                 layer_norm_epsilon=float(layer_norm_epsilon),
                 initial_head_scale=float(initial_head_scale),
-                learned_head_scale=learned_head_scale,
                 score_scale=None if score_scale is None else float(score_scale),
                 final_layer=index == config.block_count - 1,
                 device=device,
@@ -127,7 +124,6 @@ class CrossAxisSummaryTransformer(nn.Module):
         activation: object,
         layer_norm_epsilon: object,
         initial_head_scale: object,
-        learned_head_scale: object,
         score_scale: object,
         output_width: object,
         decoder_hidden_width: object,
@@ -150,8 +146,6 @@ class CrossAxisSummaryTransformer(nn.Module):
 
         real("layer_norm_epsilon", layer_norm_epsilon, positive=True)
         real("initial_head_scale", initial_head_scale, positive=False)
-        if not isinstance(learned_head_scale, bool):
-            raise TypeError("learned_head_scale must be bool")
         if score_scale is not None:
             real("score_scale", score_scale, positive=True)
         for name, value in (
