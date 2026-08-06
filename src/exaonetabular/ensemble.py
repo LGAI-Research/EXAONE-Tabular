@@ -1,10 +1,15 @@
 """Deterministic test-time ensembles for tabular inference."""
 
 from dataclasses import dataclass, replace
+import logging
 import math
 
+import numpy as np
 import torch
+from sklearn.linear_model import LinearRegression
 
+
+_logger = logging.getLogger(__name__)
 
 _FLOAT_DTYPES = (torch.float32, torch.float64)
 _LOGIT_DTYPES = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -25,8 +30,11 @@ class EnsemblePlan:
     members: int
     seed: int
     task: str = "classification"
-    # SVD components appended to every member's features. 0 leaves the feature
-    # width untouched; any positive value widens the model's input by that much.
+    # SVD components appended to every member's features, already resolved by the
+    # caller: 0 leaves the feature width untouched, any positive value widens the
+    # model's input by that much. The small-table exemption (:func:`_svd_applies`)
+    # is the estimator's call, decided once against the fitted support -- deciding
+    # it here would re-derive it from whatever subset each build happens to get.
     n_svd: int = 0
     feature_permutations: torch.Tensor | None = None
     class_permutations: torch.Tensor | None = None
@@ -260,6 +268,22 @@ def _categorical_column(
     return support_result, query_result, assignment
 
 
+def _classify_columns(x_support: torch.Tensor) -> tuple[list[int], list[int]]:
+    """Split column indices into categorical and numeric by distinct-value count."""
+    category_columns: list[int] = []
+    numeric_columns: list[int] = []
+    for column in range(x_support.shape[1]):
+        observed = x_support[:, column][~torch.isnan(x_support[:, column])]
+        target = category_columns if torch.unique(observed).numel() < 10 else numeric_columns
+        target.append(column)
+    return category_columns, numeric_columns
+
+
+def _svd_applies(rows: int, columns: int, has_categorical: bool) -> bool:
+    """Exempt small all-numeric tables: a full-rank SVD only restates the input."""
+    return not (rows < 1000 and columns < 10 and not has_categorical)
+
+
 def _append_svd_components(
     support: torch.Tensor, query: torch.Tensor, n_svd: int
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -398,12 +422,7 @@ def build_ensemble_inputs(
     device = x_support.device
     generator = torch.Generator(device=device)
     generator.manual_seed(plan.seed)
-    category_columns = []
-    numeric_columns = []
-    for column in range(x_support.shape[1]):
-        observed = x_support[:, column][~torch.isnan(x_support[:, column])]
-        target = category_columns if torch.unique(observed).numel() < 10 else numeric_columns
-        target.append(column)
+    category_columns, numeric_columns = _classify_columns(x_support)
 
     support_members = []
     query_members = []
@@ -461,12 +480,7 @@ def build_ensemble_inputs(
                 support_member[:, column], query_member[:, column] = transformed
         # Every member is transformed differently, so its basis differs too; that
         # is the diversity this buys over one projection shared by all members.
-        # Exempt small all-numeric tables: a full-rank SVD only restates the input.
-        if plan.n_svd and not (
-            x_support.shape[0] < 1000
-            and x_support.shape[1] < 10
-            and not category_columns
-        ):
+        if plan.n_svd:
             support_member, query_member = _append_svd_components(
                 support_member, query_member, plan.n_svd
             )
@@ -578,3 +592,53 @@ def aggregate_probabilities(
     if decoded.dtype in (torch.float16, torch.bfloat16):
         decoded = decoded.to(torch.float32)
     return torch.softmax(decoded.mean(dim=0), dim=1)
+
+
+def fit_member_weights(
+    member_predictions: np.ndarray, targets: np.ndarray, *, shrinkage: float
+) -> np.ndarray:
+    """Fit ensemble weights against held-out targets, then shrink toward uniform.
+
+    Solves ``min_w ||P^T w - y||`` subject to ``w >= 0`` and rescales the solution
+    to sum to one, so the aggregate stays a convex combination of members -- an
+    interpolation, never an extrapolation.  Unconstrained least squares on members
+    this correlated would return large cancelling coefficients from a validation
+    split of a few dozen rows; non-negativity is what keeps the fit usable there.
+
+    Both arguments must already be on the original target scale.
+    """
+    if not isinstance(member_predictions, np.ndarray) or not isinstance(targets, np.ndarray):
+        raise TypeError("member predictions and targets must be NumPy arrays")
+    if member_predictions.ndim != 2 or targets.ndim != 1:
+        raise ValueError("member predictions must be rank two and targets rank one")
+    if member_predictions.shape[1] != targets.shape[0]:
+        raise ValueError("member predictions and targets have different lengths")
+    if member_predictions.shape[0] == 0 or targets.shape[0] == 0:
+        raise ValueError("empty data axes are unsupported")
+    if isinstance(shrinkage, bool) or not isinstance(shrinkage, float):
+        raise TypeError("shrinkage must be a float")
+    if not math.isfinite(shrinkage) or not 0.0 <= shrinkage <= 1.0:
+        raise ValueError("shrinkage must lie in [0, 1]")
+    design = np.asarray(member_predictions, dtype=np.float64).T
+    observed = np.asarray(targets, dtype=np.float64)
+    if not np.isfinite(design).all() or not np.isfinite(observed).all():
+        raise ValueError("member predictions and targets must be finite")
+
+    members = design.shape[1]
+    uniform = np.full(members, 1.0 / members, dtype=np.float64)
+    # positive=True dispatches to scipy.optimize.nnls for a single target, so this
+    # is the NNLS solve without taking a direct dependency on scipy.
+    solver = LinearRegression(positive=True, fit_intercept=False)
+    solver.fit(design, observed)
+    weights = np.asarray(solver.coef_, dtype=np.float64)
+    if not np.isfinite(weights).all() or bool((weights < 0.0).any()):
+        raise RuntimeError("non-negative least squares returned an invalid solution")
+    total = float(weights.sum())
+    if total <= 1e-9:
+        _logger.warning(
+            "non-negative least squares zeroed every ensemble member "
+            "(weight sum %.3e); falling back to uniform weights",
+            total,
+        )
+        return uniform
+    return shrinkage * (weights / total) + (1.0 - shrinkage) * uniform

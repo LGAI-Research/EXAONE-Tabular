@@ -58,6 +58,16 @@ def _check_choice(name: str, value: Any, allowed: frozenset[str]) -> None:
         raise ValueError(f"unsupported {name}: {value!r}")
 
 
+def _check_unit_fraction(name: str, value: Any) -> float:
+    """Validate a real scalar in [0, 1] and return it coerced to float."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise TypeError(f"{name} must be a real scalar")
+    fraction = float(value)
+    if not math.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+        raise ValueError(f"{name} must lie in [0, 1]")
+    return fraction
+
+
 @dataclass(frozen=True, kw_only=True)
 class ModelConfig(_StrictMappingValue):
     width: int = 192
@@ -203,10 +213,35 @@ class RegressionConfig(_StrictMappingValue):
     # SVD components appended to every ensemble member's features; 0 disables the
     # augmentation and leaves the model's input at the preprocessed width.
     n_svd: int = 16
+    # How the members' point predictions are combined. "nnls" fits non-negative
+    # weights against a held-out slice of the support set; "uniform" averages.
+    member_weighting: str = "nnls"
+    # Blend toward the uniform 1/E. NNLS on a small validation split is sparse
+    # enough to drop members outright, and this bounds how far it may stray.
+    nnls_shrinkage: float = 0.75
+    nnls_validation_fraction: float = 0.2
+    # Held-out rows the fit must see before its weights are trusted; anything
+    # smaller stays on the uniform mean. Fitting a handful of weights against a
+    # few dozen rows is the regime where the solve collapses to all-zero.
+    nnls_min_validation_rows: int = 2000
 
     def __post_init__(self) -> None:
         if self.point_estimate not in ("median", "trimmed"):
             raise ValueError("point_estimate must be 'median' or 'trimmed'")
+        if self.member_weighting not in ("uniform", "nnls"):
+            raise ValueError("member_weighting must be 'uniform' or 'nnls'")
+        object.__setattr__(
+            self,
+            "nnls_shrinkage",
+            _check_unit_fraction("nnls_shrinkage", self.nnls_shrinkage),
+        )
+        fraction = _check_unit_fraction(
+            "nnls_validation_fraction", self.nnls_validation_fraction
+        )
+        if not 0.0 < fraction < 1.0:
+            raise ValueError("nnls_validation_fraction must lie in (0, 1)")
+        object.__setattr__(self, "nnls_validation_fraction", fraction)
+        _check_positive_int("nnls_min_validation_rows", self.nnls_min_validation_rows)
         _check_int("n_svd", self.n_svd)
         if self.n_svd < 0:
             raise ValueError("n_svd must be non-negative")
@@ -230,6 +265,10 @@ class RegressionConfig(_StrictMappingValue):
             "fixed_head_scale": self.fixed_head_scale,
             "point_estimate": self.point_estimate,
             "n_svd": self.n_svd,
+            "member_weighting": self.member_weighting,
+            "nnls_shrinkage": self.nnls_shrinkage,
+            "nnls_validation_fraction": self.nnls_validation_fraction,
+            "nnls_min_validation_rows": self.nnls_min_validation_rows,
         }
 
 
