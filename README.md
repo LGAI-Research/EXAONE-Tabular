@@ -376,8 +376,10 @@ clf = EXAONETabularClassifier(manifest, device="cuda:0")   # builds the model
 load_classifier_checkpoint(CKPT, clf.model, manifest)      # validates + loads weights
 ```
 
-A classification manifest carries a `ClassificationConfig` too; leaving it off, as above, fills in
-the defaults rather than disabling it, so `n_svd=8` applies either way.
+A classification manifest carries a `ClassificationConfig` too. Leaving it off, as above, fills in
+the defaults; `n_svd=0` therefore leaves support-SVD augmentation disabled. To opt in, import
+`ClassificationConfig` and pass `classification=ClassificationConfig(n_svd=8)` to the manifest.
+This changes inference preprocessing only and does not require different checkpoint weights.
 
 Regression is analogous with `EXAONETabularRegressor`, `load_regressor_checkpoint`, and a
 `RegressionConfig`. Two of its fields describe the checkpoint and must match it —
@@ -424,11 +426,12 @@ The configuration is frozen in `config.py` as `FEATURE_SELECTION`. It belongs to
 architecture rather than to any one checkpoint — the scorers name the model's token layout, so
 the same settings apply to every classifier checkpoint of this architecture.
 
-The classifier then appends **8 support-SVD components** to every ensemble member's features
-(`ClassificationConfig.n_svd`), each member projecting onto its own basis. Unlike the regressor
-this is unconditional: there is no small-table exemption and no un-augmented arm, because
-probability aggregation averages members rather than weighting them and so has no way to price a
-second view. Set `n_svd=0` to switch the augmentation off.
+**Optional support-SVD augmentation.** By default, the classifier does not append support-SVD
+components (`ClassificationConfig.n_svd=0`). Set `n_svd` to a positive integer—for example,
+`n_svd=8`—to append that many components to every ensemble member's features, with each member
+projecting onto its own basis. Once enabled, this augmentation is unconditional: unlike the
+regressor, classification has no small-table exemption or un-augmented comparison arm because
+probability aggregation averages members rather than fitting member weights.
 
 **The regressor narrows differently.** `EXAONETabularRegressor` reads up to **1024 columns** and
 trims anything wider with univariate `f_regression` — an F-test against the target, so it costs no
