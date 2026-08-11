@@ -92,8 +92,21 @@ def resolve_weights(
     env_value = os.environ.get(checkpoint.weights_env_var)
     if env_value:
         return _resolve_user_source(env_value, target_filename, revision, cache_dir)
-
+    
+    resolved_revision = revision or checkpoint.revision
+    
+    # Query config.json so Hugging Face can track model downloads.
+    _hf_download(
+        checkpoint.repo_id,
+        "config.json",
+        resolved_revision,
+        cache_dir,
+    )
+    
     path = _hf_download(
-        checkpoint.repo_id, target_filename, revision or checkpoint.revision, cache_dir
+        checkpoint.repo_id,
+        target_filename,
+        resolved_revision,
+        cache_dir,
     )
     return WeightSource(path=path, is_default=True)
