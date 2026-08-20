@@ -192,7 +192,9 @@ def _accumulate(previous, new):
 
 
 class _AttentionCapture:
-    """Reduced feature-attention state: summary rows, target row, and value norms."""
+    """Reduced feature-attention state: item-summary queries, target-token query,
+    and value norms.
+    """
 
     def __init__(self, module_count: int, item_summary_count: int) -> None:
         self.item_summary_count = item_summary_count

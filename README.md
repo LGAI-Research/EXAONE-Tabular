@@ -48,14 +48,27 @@ A technical report will follow.
 - Feed-forward expansion: 4x
 - MLP sharing: Single
 - Feature-attention operations per layer: 2
-- Feature-level summary tokens: 3
-- Row-level summary tokens: 32
+- Item-summary tokens per item: 3
+- Feature-summary tokens per feature: 32
 - Attention normalization: SSMax
+
+Item-summary tokens have shape `[batch, items, 3, width]` and are concatenated
+with cell representations along the feature axis. Feature-summary tokens have
+shape `[batch, 32, features, width]` and are concatenated with support-item
+representations along the item axis.
+
 - Total parameters
   - Classification: 20,807,866 (≈20.8M)
   - Regression: 21,110,247 (≈21.1M)
 
 </div>
+
+The diagram below shows how item-summary and feature-summary tokens are arranged across CAST's
+feature and item axes.
+
+<p align="center">
+  <img src="assets/cast_summary_token_layout.png" alt="CAST item-summary and feature-summary token layout" width="100%">
+</p>
 
 
 ## Evaluation Results
@@ -408,10 +421,11 @@ clf.predict_proba(X_test)          # still takes all 5000 columns
 ```
 
 **How it works.** One forward pass over a ≤512-row sample of the fitted table, with the
-feature-attention blocks instrumented. Two signals are read per column — attention from the target
-row, and the summed attention from the item-summary rows — each weighted by the value-vector norm so
-the score reflects information actually routed through the attention path rather than raw attention
-probability. The two are min-max normalized, averaged, and the top 100 columns are kept.
+feature-attention blocks instrumented. Two signals are read per column — attention from the
+target-token query and the summed attention from the item-summary token queries — each weighted by
+the value-vector norm so the score reflects information actually routed through the attention path
+rather than raw attention probability. The two are min-max normalized, averaged, and the top 100
+columns are kept.
 
 **What to expect.**
 
@@ -590,7 +604,8 @@ Query chunking controls peak query-side memory because query predictions
 are conditionally independent given the support set. However, the current inference wrapper recomputes
 the support representations for each estimator and query chunk, introducing redundant computation when
 either the ensemble size or the number of query chunks is large. The model already provides a support-side
-caching path for row-axis attention, but this path is not yet used by the default chunked-inference wrapper.
+caching path for item-axis (row-axis) attention, but this path is not yet used by the default
+chunked-inference wrapper.
 Activating support-representation caching could reduce repeated computation across query chunks.
 Support sets beyond the configured inference limit are currently subsampled. Potential future directions
 include support-side representation and KV caching, context compression, representative-context selec-

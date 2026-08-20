@@ -52,7 +52,14 @@ def _construct(component: type[nn.Module], values: dict[str, Any]) -> nn.Module:
 
 
 class CrossAxisSummaryLayer(nn.Module):
-    """Mix feature and item summary tokens with row-by-feature state."""
+    """Mix item-summary and feature-summary states with item-by-feature cell states.
+
+    Item-summary tokens have shape ``[batch, items, item_slots, width]`` and
+    are concatenated with cells along the feature axis. Feature-summary tokens
+    have shape ``[batch, feature_slots, features, width]`` and are concatenated
+    with support cells along the item axis. Before each axis-wise self-attention,
+    cells read from the summary state attached to the opposite axis.
+    """
 
     def __init__(
         self,
@@ -368,13 +375,15 @@ class CrossAxisSummaryLayer(nn.Module):
     ) -> torch.Tensor:
         """Run one feature-attention repeat over a block of rows.
 
-        Rows are a batch axis in feature attention, so a block is processed
-        independently of every other row while reading the shared, read-only
-        ``feature_summary``. The returned token block is ``item_summary``
-        concatenated with ``state`` along dim 2, already normalized -- LayerNorm
-        is token-wise over ``width``, so normalizing the joined block equals
-        normalizing the two halves separately. This is what makes the chunked
-        and full-row paths agree.
+        Items are a batch axis in feature attention, so every item block is
+        processed independently. Its cells first read the shared, read-only
+        ``feature_summary`` states associated with their features, using
+        cross-attention when multiple feature-summary slots are configured. The
+        returned token block is ``item_summary`` concatenated with the
+        feature-contextualized ``state`` along the feature axis (dim 2), already
+        normalized. LayerNorm is token-wise over ``width``, so normalizing the
+        joined block equals normalizing the two halves separately. This is what
+        makes the chunked and full-row paths agree.
         """
         if self.feature_summary_count == 1:
             feature_context = state_block + feature_summary[:, 0].unsqueeze(1)
@@ -509,7 +518,8 @@ class CrossAxisSummaryLayer(nn.Module):
                 (feature_summary, item_context[:, :support_size]), dim=1
             )
 
-            # Item attention runs over rows separately for each feature group.
+            # Feature-summary tokens prefix the support items along the item axis,
+            # which is processed independently for each feature group.
             context_sequence = context_rows.transpose(1, 2)
             retain_context = cache_support or item_context.shape[1] > support_size
             if output_support:
@@ -555,8 +565,8 @@ class CrossAxisSummaryLayer(nn.Module):
             query_rows = item_context[:, support_size:]
 
         if query_rows.shape[1]:
-            # Cross-attention has no query rows in the context, so query rows
-            # can share one batched context without interacting with each other.
+            # Query items are absent from the context, so they share the same
+            # feature-summary-plus-support sequence without interacting with one another.
             query_sequence = query_rows.transpose(1, 2)
             try:
                 if self.item_attention.has_cached_context:

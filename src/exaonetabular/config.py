@@ -301,8 +301,9 @@ class AttentionScorer(_StrictMappingValue):
     """One per-feature importance signal read out of the feature-attention blocks.
 
     Each scorer reduces the captured attention over heads and layers into a score
-    per input column.  ``aggregation`` picks which attention rows are read:
-    ``y_attn`` uses the target row, ``sumi_to_feat`` sums the item-summary rows.
+    per input column.  ``aggregation`` picks which feature-attention query tokens
+    are read: ``y_attn`` uses the target-token query, while ``sumi_to_feat`` sums
+    the item-summary token queries.
 
     Two behaviors are unconditional rather than configurable, because the released
     configuration uses the same value for both scorers: head reduction is always
@@ -374,8 +375,9 @@ class FeatureSelectionConfig(_StrictMappingValue):
 
 # The one selection configuration this package implements. It is deliberately *not*
 # part of InferenceManifest or ReleasedCheckpoint: what the scorers name is the
-# architecture's token layout — `y_attn` is the target row, `sumi_to_feat` the
-# item-summary rows, `last` the final feature-attention module — so it is identical
+# architecture's token layout — `y_attn` is the target-token query, `sumi_to_feat`
+# the item-summary token queries, and `last` the final feature-attention module —
+# so it is identical
 # for every checkpoint of this architecture rather than a property of any one weights
 # file. Selection is unconditional; there is no opt-out.
 FEATURE_SELECTION = FeatureSelectionConfig(

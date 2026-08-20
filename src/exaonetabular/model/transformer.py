@@ -43,7 +43,9 @@ def run_in_chunks(
 
 
 class CrossAxisSummaryTransformer(nn.Module):
-    """Apply cross-axis summary layers and classify the query-row readout tokens."""
+    """Apply CAST layers with item summaries on feature-axis sequences and feature
+    summaries on item-axis sequences, then decode query-item readouts.
+    """
 
     def __init__(
         self,
