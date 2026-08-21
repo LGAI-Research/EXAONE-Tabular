@@ -49,6 +49,7 @@ def test_default_source_downloads_pinned_release(monkeypatch):
 
     assert source.is_default is True
     assert calls == [
+        (checkpoint.repo_id, "config.json", checkpoint.revision, None),
         (checkpoint.repo_id, checkpoint.filename, checkpoint.revision, None)
     ]
 
