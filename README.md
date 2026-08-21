@@ -621,7 +621,7 @@ Two licenses apply, to two different things:
 - **The code in this repository** — the `exaonetabular` inference runtime — is released under the
   [BSD-3-Clause-LG AI Research License](LICENSE), which permits commercial use.
 - **The released model weights** are licensed separately under the **EXAONE AI Model License
-  Agreement 1.1 - NC**, which limits use to non-commercial research and education. The full terms
+  Agreement 1.2 - NC**, which limits use to non-commercial research and education. The full terms
   ship with the weights on the [Hugging Face repository](https://huggingface.co/LG-AI-Research/EXAONE-Tabular).
 
 Installing this package therefore does not grant commercial rights to the weights it downloads.
