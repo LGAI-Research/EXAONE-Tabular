@@ -73,132 +73,93 @@ feature and item axes.
 
 ## Evaluation Results
 
-> [PLACEHOLDER: replace the placeholder cells below (shown as "—") with measured results, and
-> finalize the baseline columns and benchmark rows. Optionally promote headline numbers to a
-> `model-index` block in the YAML front matter for the Hub's results widget.]
+### TabArena
 
-### Classification (accuracy ↑, %)
+EXAONE Tabular achieves an overall Elo of **1,755** on TabArena without per-dataset tuning or ensembling. It ranks second overall, first on classification with an Elo of **1,759**, and second on regression with an Elo of **1,883**, while using approximately 21M parameters.
 
-<table>
-	<tr>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;"> </th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">EXAONE Tabular</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">TabPFN v2</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">XGBoost (tuned)</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">CatBoost (tuned)</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">AutoGluon</th>
-	</tr>
-	<tr>
-		<td align="center">Approach</td>
-		<td align="center">In-context</td>
-		<td align="center">In-context</td>
-		<td align="center">GBDT</td>
-		<td align="center">GBDT</td>
-		<td align="center">AutoML</td>
-	</tr>
-	<tr>
-		<td align="center">Per-dataset tuning</td>
-		<td align="center">None</td>
-		<td align="center">None</td>
-		<td align="center">HPO</td>
-		<td align="center">HPO</td>
-		<td align="center">Auto</td>
-	</tr>
-	<tr>
-		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>OpenML Suites</i></td>
-	</tr>
-	<tr>
-		<td align="center">OpenML-CC18 (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center">AutoML Benchmark (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>Curated Tabular Suites</i></td>
-	</tr>
-	<tr>
-		<td align="center">TabZilla (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center"> — numerical (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center"> — categorical (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-</table>
+All TabArena results reported below are taken from the official [TabArena leaderboard](https://huggingface.co/spaces/TabArena/leaderboard).
 
-### Regression (R² ↑)
+<div align="center">
+  <img src="figures/tabarena_overall_elo_model_parameters.svg" alt="Overall TabArena Elo versus model parameters" width="92%">
+  <br>
+  <em>Figure 1. Overall TabArena Elo versus model size. EXAONE Tabular achieves competitive performance with approximately 21M parameters.</em>
+</div>
+
+<div align="center">
+  <img src="figures/tabarena_elo_cls_reg.svg" alt="TabArena classification Elo on the left and regression Elo on the right" width="94%">
+  <br>
+  <em>Figure 2. TabArena Elo scores on classification (left) and regression (right) tasks.</em>
+</div>
+
+**Table 1.** *TabArena Elo scores and computational costs. Training and prediction costs are median seconds per 1,000 samples.*
 
 <table>
-	<tr>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;"> </th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">EXAONE Tabular</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">TabPFN v2</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">XGBoost (tuned)</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">CatBoost (tuned)</th>
-		<th style="background: rgba(128,128,128,0.1); text-align: center;">AutoGluon</th>
-	</tr>
-	<tr>
-		<td align="center">Approach</td>
-		<td align="center">In-context</td>
-		<td align="center">In-context</td>
-		<td align="center">GBDT</td>
-		<td align="center">GBDT</td>
-		<td align="center">AutoML</td>
-	</tr>
-	<tr>
-		<td align="center" colspan='6' style="background: linear-gradient(90deg, rgba(252,146,108,0.3) 0%, rgba(227,67,189,0.3) 50%, rgba(104,76,244,0.3) 100%); font-weight: bold; height:32px; padding-top:2px; padding-bottom:2px;"><i>Curated Tabular Suites</i></td>
-	</tr>
-	<tr>
-		<td align="center">OpenML-CTR23 (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center"> regression (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
-	<tr>
-		<td align="center">TabZilla regression (avg)</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-		<td align="center">—</td>
-	</tr>
+  <thead>
+    <tr>
+      <th bgcolor="#EEF2FF" align="left">Model type</th>
+      <th bgcolor="#EEF2FF" align="left">Model</th>
+      <th bgcolor="#EEF2FF" align="left">Configuration</th>
+      <th bgcolor="#EEF2FF" align="right">Overall Elo ↑</th>
+      <th bgcolor="#EEF2FF" align="right">Cls. Elo ↑</th>
+      <th bgcolor="#EEF2FF" align="right">Reg. Elo ↑</th>
+      <th bgcolor="#EEF2FF" align="right">Cost: train / predict (s/1K) ↓</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#F5F8FF" style="color:#1E3A8A; font-weight:700;"><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>Foundation Model</strong></font></td><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>EXAONE Tabular</strong></font></td><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>Default</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,755</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,759</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,883</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>5.79 / 0.605</strong></font></td></tr>
+    <tr><td>Foundation Model</td><td>TabFM</td><td>Default</td><td align="right">1,765</td><td align="right">1,746</td><td align="right">1,993</td><td align="right">38.81 / 6.985</td></tr>
+    <tr><td>Foundation Model</td><td>TabPFN-3</td><td>Default</td><td align="right">1,642</td><td align="right">1,635</td><td align="right">1,793</td><td align="right">3.66 / 0.399</td></tr>
+    <tr><td>Foundation Model</td><td>TabPFN-2.6</td><td>Default</td><td align="right">1,592</td><td align="right">1,586</td><td align="right">1,734</td><td align="right">5.48 / 0.555</td></tr>
+    <tr><td>Foundation Model</td><td>RealTabPFN-2.5</td><td>Tuned + ensembled</td><td align="right">1,572</td><td align="right">1,562</td><td align="right">1,731</td><td align="right">2,040.22 / 8.908</td></tr>
+    <tr><td>Foundation Model</td><td>TabICLv2</td><td>Default</td><td align="right">1,569</td><td align="right">1,574</td><td align="right">1,672</td><td align="right">2.05 / 0.151</td></tr>
+    <tr><td>Neural Network</td><td>RealMLP</td><td>Tuned + ensembled</td><td align="right">1,482</td><td align="right">1,468</td><td align="right">1,648</td><td align="right">2,950.72 / 11.975</td></tr>
+    <tr><td>Foundation Model</td><td>TabDPT</td><td>Tuned + ensembled</td><td align="right">1,437</td><td align="right">1,398</td><td align="right">1,715</td><td align="right">4,910.38 / 286.537</td></tr>
+    <tr><td>Neural Network</td><td>TabM</td><td>Tuned + ensembled</td><td align="right">1,426</td><td align="right">1,446</td><td align="right">1,449</td><td align="right">2,450.13 / 2.247</td></tr>
+    <tr><td>Tree-based</td><td>LightGBM</td><td>Tuned + ensembled</td><td align="right">1,410</td><td align="right">1,415</td><td align="right">1,477</td><td align="right">417.05 / 2.639</td></tr>
+    <tr><td>Tree-based</td><td>CatBoost</td><td>Tuned + ensembled</td><td align="right">1,398</td><td align="right">1,398</td><td align="right">1,484</td><td align="right">1,346.21 / 0.344</td></tr>
+    <tr><td>Tree-based</td><td>XGBoost</td><td>Tuned + ensembled</td><td align="right">1,357</td><td align="right">1,364</td><td align="right">1,404</td><td align="right">693.49 / 1.689</td></tr>
+    <tr><td>Foundation Model</td><td>TabSwift</td><td>Default</td><td align="right">1,334</td><td align="right">1,339</td><td align="right">1,397</td><td align="right">1.18 / 0.072</td></tr>
+    <tr><td>Foundation Model</td><td>Nori-30M</td><td>Default</td><td align="right">1,156</td><td align="right">—</td><td align="right">1,753</td><td align="right">0.53 / 0.080</td></tr>
+  </tbody>
 </table>
+
+Elo scores are reported for the same configuration shown in the `Configuration` column. Cost is the median training and prediction time per 1,000 samples from the overall TabArena results; lower is better. Nori-30M has no classification result in the source data.
+
+### ScoringBench
+
+The results below are taken from the official [ScoringBench leaderboard](https://scoringbench.com/). The reported average ranks were computed against the full ScoringBench comparison pool of 51 model entries across 102 datasets. Figure 3 visualizes a selected set of 28 models, while Table 2 displays only the 10 model families that overlap with the TabArena table; neither the figure nor the table recomputes ranks on these subsets.
+
+<div align="center">
+  <img src="figures/scoringbench_r2_crps_site_style_tikz.svg" alt="ScoringBench R-squared and CRPS mean ranks" width="92%">
+  <br>
+  <em>Figure 3. Mean-rank comparison on ScoringBench across R² and CRPS; lower ranks are better.</em>
+</div>
+
+**Table 2.** *ScoringBench average ranks for models also included in the TabArena comparison. Lower is better.*
+
+<table>
+  <thead>
+    <tr>
+      <th bgcolor="#EEF2FF" align="left">Model</th>
+      <th bgcolor="#EEF2FF" align="right">R² average rank ↓</th>
+      <th bgcolor="#EEF2FF" align="right">CRPS average rank ↓</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#F5F8FF" style="color:#1E3A8A; font-weight:700;"><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>EXAONE Tabular</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>8.75</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>6.07</strong></font></td></tr>
+    <tr><td>TabPFN-3</td><td align="right">10.03</td><td align="right">6.16</td></tr>
+    <tr><td>Nori-30M</td><td align="right">14.90</td><td align="right">11.59</td></tr>
+    <tr><td>TabICLv2</td><td align="right">15.99</td><td align="right">11.88</td></tr>
+    <tr><td>TabPFN-2.6</td><td align="right">16.87</td><td align="right">18.89</td></tr>
+    <tr><td>RealTabPFN-2.5</td><td align="right">20.70</td><td align="right">19.96</td></tr>
+    <tr><td>CatBoost</td><td align="right">33.52</td><td align="right">34.62</td></tr>
+    <tr><td>TabM</td><td align="right">35.95</td><td align="right">33.79</td></tr>
+    <tr><td>RealMLP</td><td align="right">36.14</td><td align="right">34.05</td></tr>
+    <tr><td>XGBoost</td><td align="right">38.83</td><td align="right">38.76</td></tr>
+  </tbody>
+</table>
+
+The benchmark-specific ScoringBench entries for RealTabPFN-2.5, CatBoost, TabM, RealMLP, and XGBoost are `tabpfn_realv2_5`, `catboost_quantile`, `tabm_d`, `pytabkit_realmlp_td`, and `xgb_vector`, respectively. Models are matched across the two benchmarks by model family, so their configurations may differ: for example, Table 1 reports the tuned-and-ensembled RealTabPFN-2.5, whereas Table 2 uses the `tabpfn_realv2_5` entry evaluated by ScoringBench.
 
 
 ## Requirements
