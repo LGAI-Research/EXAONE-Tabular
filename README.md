@@ -93,35 +93,22 @@ All TabArena results reported below are taken from the official [TabArena leader
 
 **Table 1.** *TabArena Elo scores and computational costs. Training and prediction costs are median seconds per 1,000 samples.*
 
-<table>
-  <thead>
-    <tr>
-      <th bgcolor="#EEF2FF" align="left">Model type</th>
-      <th bgcolor="#EEF2FF" align="left">Model</th>
-      <th bgcolor="#EEF2FF" align="left">Configuration</th>
-      <th bgcolor="#EEF2FF" align="right">Overall Elo ↑</th>
-      <th bgcolor="#EEF2FF" align="right">Cls. Elo ↑</th>
-      <th bgcolor="#EEF2FF" align="right">Reg. Elo ↑</th>
-      <th bgcolor="#EEF2FF" align="right">Cost: train / predict (s/1K) ↓</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr bgcolor="#F5F8FF" style="color:#1E3A8A; font-weight:700;"><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>Foundation Model</strong></font></td><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>EXAONE Tabular</strong></font></td><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>Default</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,755</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,759</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>1,883</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>5.79 / 0.605</strong></font></td></tr>
-    <tr><td>Foundation Model</td><td>TabFM</td><td>Default</td><td align="right">1,765</td><td align="right">1,746</td><td align="right">1,993</td><td align="right">38.81 / 6.985</td></tr>
-    <tr><td>Foundation Model</td><td>TabPFN-3</td><td>Default</td><td align="right">1,642</td><td align="right">1,635</td><td align="right">1,793</td><td align="right">3.66 / 0.399</td></tr>
-    <tr><td>Foundation Model</td><td>TabPFN-2.6</td><td>Default</td><td align="right">1,592</td><td align="right">1,586</td><td align="right">1,734</td><td align="right">5.48 / 0.555</td></tr>
-    <tr><td>Foundation Model</td><td>RealTabPFN-2.5</td><td>Tuned + ensembled</td><td align="right">1,572</td><td align="right">1,562</td><td align="right">1,731</td><td align="right">2,040.22 / 8.908</td></tr>
-    <tr><td>Foundation Model</td><td>TabICLv2</td><td>Default</td><td align="right">1,569</td><td align="right">1,574</td><td align="right">1,672</td><td align="right">2.05 / 0.151</td></tr>
-    <tr><td>Neural Network</td><td>RealMLP</td><td>Tuned + ensembled</td><td align="right">1,482</td><td align="right">1,468</td><td align="right">1,648</td><td align="right">2,950.72 / 11.975</td></tr>
-    <tr><td>Foundation Model</td><td>TabDPT</td><td>Tuned + ensembled</td><td align="right">1,437</td><td align="right">1,398</td><td align="right">1,715</td><td align="right">4,910.38 / 286.537</td></tr>
-    <tr><td>Neural Network</td><td>TabM</td><td>Tuned + ensembled</td><td align="right">1,426</td><td align="right">1,446</td><td align="right">1,449</td><td align="right">2,450.13 / 2.247</td></tr>
-    <tr><td>Tree-based</td><td>LightGBM</td><td>Tuned + ensembled</td><td align="right">1,410</td><td align="right">1,415</td><td align="right">1,477</td><td align="right">417.05 / 2.639</td></tr>
-    <tr><td>Tree-based</td><td>CatBoost</td><td>Tuned + ensembled</td><td align="right">1,398</td><td align="right">1,398</td><td align="right">1,484</td><td align="right">1,346.21 / 0.344</td></tr>
-    <tr><td>Tree-based</td><td>XGBoost</td><td>Tuned + ensembled</td><td align="right">1,357</td><td align="right">1,364</td><td align="right">1,404</td><td align="right">693.49 / 1.689</td></tr>
-    <tr><td>Foundation Model</td><td>TabSwift</td><td>Default</td><td align="right">1,334</td><td align="right">1,339</td><td align="right">1,397</td><td align="right">1.18 / 0.072</td></tr>
-    <tr><td>Foundation Model</td><td>Nori-30M</td><td>Default</td><td align="right">1,156</td><td align="right">—</td><td align="right">1,753</td><td align="right">0.53 / 0.080</td></tr>
-  </tbody>
-</table>
+| Model type | Model | Configuration | Overall Elo ↑ | Cls. Elo ↑ | Reg. Elo ↑ | Cost: train / predict (s/1K) ↓ |
+|:--|:--|:--|--:|--:|--:|--:|
+| **Foundation Model** | **EXAONE Tabular** | **Default** | **1,755** | **1,759** | **1,883** | **5.79 / 0.605** |
+| Foundation Model | TabFM | Default | 1,765 | 1,746 | 1,993 | 38.81 / 6.985 |
+| Foundation Model | TabPFN-3 | Default | 1,642 | 1,635 | 1,793 | 3.66 / 0.399 |
+| Foundation Model | TabPFN-2.6 | Default | 1,592 | 1,586 | 1,734 | 5.48 / 0.555 |
+| Foundation Model | RealTabPFN-2.5 | Tuned + ensembled | 1,572 | 1,562 | 1,731 | 2,040.22 / 8.908 |
+| Foundation Model | TabICLv2 | Default | 1,569 | 1,574 | 1,672 | 2.05 / 0.151 |
+| Neural Network | RealMLP | Tuned + ensembled | 1,482 | 1,468 | 1,648 | 2,950.72 / 11.975 |
+| Foundation Model | TabDPT | Tuned + ensembled | 1,437 | 1,398 | 1,715 | 4,910.38 / 286.537 |
+| Neural Network | TabM | Tuned + ensembled | 1,426 | 1,446 | 1,449 | 2,450.13 / 2.247 |
+| Tree-based | LightGBM | Tuned + ensembled | 1,410 | 1,415 | 1,477 | 417.05 / 2.639 |
+| Tree-based | CatBoost | Tuned + ensembled | 1,398 | 1,398 | 1,484 | 1,346.21 / 0.344 |
+| Tree-based | XGBoost | Tuned + ensembled | 1,357 | 1,364 | 1,404 | 693.49 / 1.689 |
+| Foundation Model | TabSwift | Default | 1,334 | 1,339 | 1,397 | 1.18 / 0.072 |
+| Foundation Model | Nori-30M | Default | 1,156 | — | 1,753 | 0.53 / 0.080 |
 
 Elo scores are reported for the same configuration shown in the `Configuration` column. Cost is the median training and prediction time per 1,000 samples from the overall TabArena results; lower is better. Nori-30M has no classification result in the source data.
 
@@ -137,27 +124,18 @@ The results below are taken from the official [ScoringBench leaderboard](https:/
 
 **Table 2.** *ScoringBench average ranks for models also included in the TabArena comparison. Lower is better.*
 
-<table>
-  <thead>
-    <tr>
-      <th bgcolor="#EEF2FF" align="left">Model</th>
-      <th bgcolor="#EEF2FF" align="right">R² average rank ↓</th>
-      <th bgcolor="#EEF2FF" align="right">CRPS average rank ↓</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr bgcolor="#F5F8FF" style="color:#1E3A8A; font-weight:700;"><td style="color:#1E3A8A;"><font color="#1E3A8A"><strong>EXAONE Tabular</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>8.75</strong></font></td><td align="right" style="color:#1E3A8A;"><font color="#1E3A8A"><strong>6.07</strong></font></td></tr>
-    <tr><td>TabPFN-3</td><td align="right">10.03</td><td align="right">6.16</td></tr>
-    <tr><td>Nori-30M</td><td align="right">14.90</td><td align="right">11.59</td></tr>
-    <tr><td>TabICLv2</td><td align="right">15.99</td><td align="right">11.88</td></tr>
-    <tr><td>TabPFN-2.6</td><td align="right">16.87</td><td align="right">18.89</td></tr>
-    <tr><td>RealTabPFN-2.5</td><td align="right">20.70</td><td align="right">19.96</td></tr>
-    <tr><td>CatBoost</td><td align="right">33.52</td><td align="right">34.62</td></tr>
-    <tr><td>TabM</td><td align="right">35.95</td><td align="right">33.79</td></tr>
-    <tr><td>RealMLP</td><td align="right">36.14</td><td align="right">34.05</td></tr>
-    <tr><td>XGBoost</td><td align="right">38.83</td><td align="right">38.76</td></tr>
-  </tbody>
-</table>
+| Model | R² average rank ↓ | CRPS average rank ↓ |
+|:--|--:|--:|
+| **EXAONE Tabular** | **8.75** | **6.07** |
+| TabPFN-3 | 10.03 | 6.16 |
+| Nori-30M | 14.90 | 11.59 |
+| TabICLv2 | 15.99 | 11.88 |
+| TabPFN-2.6 | 16.87 | 18.89 |
+| RealTabPFN-2.5 | 20.70 | 19.96 |
+| CatBoost | 33.52 | 34.62 |
+| TabM | 35.95 | 33.79 |
+| RealMLP | 36.14 | 34.05 |
+| XGBoost | 38.83 | 38.76 |
 
 The benchmark-specific ScoringBench entries for RealTabPFN-2.5, CatBoost, TabM, RealMLP, and XGBoost are `tabpfn_realv2_5`, `catboost_quantile`, `tabm_d`, `pytabkit_realmlp_td`, and `xgb_vector`, respectively. Models are matched across the two benchmarks by model family, so their configurations may differ: for example, Table 1 reports the tuned-and-ensembled RealTabPFN-2.5, whereas Table 2 uses the `tabpfn_realv2_5` entry evaluated by ScoringBench.
 
