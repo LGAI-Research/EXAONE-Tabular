@@ -32,8 +32,7 @@ Both checkpoints are released: `EXAONETabularClassifier` and `EXAONETabularRegre
 their own weights with a single `from_pretrained()` call. See
 [Available checkpoints](#available-checkpoints).
 
-For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular).
-A technical report will follow.
+For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular) and [Technical Report](https://github.com/LGAI-Research/EXAONE-Tabular/EXAONE_Tabular_v1.0_Technical_Report.pdf)
 
 
 ## Model Configuration
@@ -568,15 +567,16 @@ Installing this package therefore does not grant commercial rights to the weight
 
 ## Citation
 
-```
-@article{exaonetabular,
-  title={EXAONE Tabular: [PLACEHOLDER]},
-  author={{[PLACEHOLDER]}},
-  journal={[PLACEHOLDER]},
-  year={[PLACEHOLDER]}
+```bibtex
+@article{eo2026exaonetabular,
+  title         = {EXAONE Tabular 1.0: Technical Report},
+  author        = {Eo, Moonjung and Suh, Min-Kook and Cho, Hye-Seung and Kim, Jiwon and Kim, Seoyoon and Nam, Sangjun and Lee, Soonyoung},
+  year          = {2026},
+  eprint        = {2608.25774},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG}
 }
 ```
-
 
 ## Contact
 
