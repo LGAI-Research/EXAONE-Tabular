@@ -32,7 +32,7 @@ Both checkpoints are released: `EXAONETabularClassifier` and `EXAONETabularRegre
 their own weights with a single `from_pretrained()` call. See
 [Available checkpoints](#available-checkpoints).
 
-For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular) and [Technical Report](https://github.com/LGAI-Research/EXAONE-Tabular/EXAONE_Tabular_v1.0_Technical_Report.pdf)
+For more details, please refer to the [GitHub repository](https://github.com/LGAI-Research/EXAONE-Tabular) and [Technical Report](EXAONE_Tabular_v1.0_Technical_Report.pdf)
 
 
 ## Model Configuration
