@@ -64,7 +64,7 @@ def _restore_feature_order(
     return torch.stack(restored)
 
 
-def test_plan_keeps_eight_distinct_executions_and_pairs_class_orders() -> None:
+def test_plan_keeps_eight_executions_and_cycles_class_offsets() -> None:
     support, labels, query = _numeric_problem()
     xs, ys, xq, plan = build_ensemble_inputs(
         support, labels, query, EnsemblePlan(members=8, seed=0)
@@ -73,18 +73,15 @@ def test_plan_keeps_eight_distinct_executions_and_pairs_class_orders() -> None:
     assert xs.shape[0] == ys.shape[0] == xq.shape[0] == plan.members == 8
     assert not hasattr(plan, "member_sources")
     assert plan.class_permutations is not None
-    for member in range(4, 8):
+    for member in range(0, 8, 2):
         assert not torch.equal(
-            plan.class_permutations[member], plan.class_permutations[member - 4]
+            plan.class_permutations[member], plan.class_permutations[member + 1]
         )
 
     assert plan.feature_permutations is not None
     restored = _restore_feature_order(xs, plan.feature_permutations)
-    # The deterministic rules share their prepared tensors across the two
-    # cycles, while noisy Gaussianization remains member-specific.
-    for first, second in ((0, 4), (1, 5), (2, 6)):
-        torch.testing.assert_close(restored[first], restored[second], rtol=0, atol=0)
-    assert not torch.equal(restored[3], restored[7])
+    for first, second in ((0, 4), (1, 5), (2, 6), (3, 7)):
+        torch.testing.assert_close(restored[first].abs(), restored[second].abs(), rtol=0, atol=0)
 
 
 def test_members_depend_only_on_the_plan_seed_not_ambient_rng() -> None:
@@ -119,29 +116,15 @@ def test_members_depend_only_on_the_plan_seed_not_ambient_rng() -> None:
     assert not torch.equal(first, other)
 
 
-def test_categorical_assignments_do_not_repeat_across_member_cycles() -> None:
-    support = torch.tensor(
-        [[0, 0], [1, 1], [0, 2], [1, 0], [0, 1], [1, 2]],
-        dtype=torch.float32,
-    )
-    query = torch.tensor([[0, 2], [1, 0]], dtype=torch.float32)
-    labels = torch.arange(6).remainder(2).to(torch.float32)
-    xs, _, _, plan = build_ensemble_inputs(
-        support, labels, query, EnsemblePlan(members=8, seed=17)
-    )
-    assert plan.feature_permutations is not None
+def test_categorical_alignment_reuses_support_codes() -> None:
+    support = torch.tensor([[0., 0.], [1., 1.], [0., 2.], [1., 0.], [0., 1.], [1., 2.]])
+    query = torch.tensor([[99., 99.], [float("nan"), float("nan")]])
+    labels = torch.arange(6).remainder(2).float()
+    xs, _, xq, plan = build_ensemble_inputs(support, labels, query, EnsemblePlan(members=8, seed=17))
     restored = _restore_feature_order(xs, plan.feature_permutations)
-
-    def standardized(values: torch.Tensor) -> torch.Tensor:
-        return (values - values.mean(dim=0)) / values.std(dim=0, correction=0)
-
-    normalized = torch.stack([standardized(member) for member in restored])
-    for member in range(4, 8):
-        for column in range(support.shape[1]):
-            assert not torch.equal(
-                normalized[member, :, column],
-                normalized[member - 4, :, column],
-            )
+    for member in range(4):
+        torch.testing.assert_close(restored[member], restored[member + 4], rtol=0, atol=0)
+    torch.testing.assert_close(xq[:, 0], xq[:, 1], rtol=0, atol=0)
 
 
 def test_classifier_executes_all_eight_members(monkeypatch) -> None:

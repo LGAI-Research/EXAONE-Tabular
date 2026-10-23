@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from sklearn.linear_model import LinearRegression
 
+from ._inference_preprocessing import _FeatureEnsemble
 
 _logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class EnsemblePlan:
     feature_permutations: torch.Tensor | None = None
     class_permutations: torch.Tensor | None = None
     class_count: int | None = None
+    target_signs: torch.Tensor | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.members, bool) or not isinstance(self.members, int):
@@ -391,6 +393,7 @@ def _validate_build(
             plan.feature_permutations,
             plan.class_permutations,
             plan.class_count,
+            plan.target_signs,
         )
     ):
         raise ValueError("plan is already fitted")
@@ -414,122 +417,66 @@ def _validate_build(
 def build_ensemble_inputs(
     x_support: torch.Tensor,
     y_support: torch.Tensor,
-    x_query: torch.Tensor,
+    x_query: torch.Tensor | np.ndarray,
     plan: EnsemblePlan,
+    *,
+    preprocessor: _FeatureEnsemble | None = None,
+    categorical_mask: np.ndarray | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, EnsemblePlan]:
-    """Construct deterministic ensemble members and their fitted metadata."""
+    query_values = x_query
+    if isinstance(x_query, np.ndarray) and isinstance(x_support, torch.Tensor):
+        x_query = torch.as_tensor(x_query, dtype=x_support.dtype, device=x_support.device)
     _validate_build(x_support, y_support, x_query, plan)
-    device = x_support.device
-    generator = torch.Generator(device=device)
-    generator.manual_seed(plan.seed)
-    category_columns, numeric_columns = _classify_columns(x_support)
-
-    support_members = []
-    query_members = []
-    label_members = []
-    feature_permutations = []
-    class_permutations = []
-    categorical_assignments: dict[tuple[int, int], torch.Tensor] = {}
-    numeric_transform_cache: dict[
-        tuple[int, int], tuple[torch.Tensor, torch.Tensor]
-    ] = {}
-    class_count = (
-        int(torch.unique(y_support.to(torch.int64)).numel())
-        if plan.task == "classification"
-        else None
-    )
-    for member in range(plan.members):
-        support_member = x_support.clone()
-        query_member = x_query.clone()
-        for column in category_columns:
-            if member == 0:
-                category_count = torch.unique(
-                    x_support[:, column][~torch.isnan(x_support[:, column])]
-                ).numel()
-                categorical_assignments[(member, column)] = torch.arange(
-                    category_count, dtype=torch.int64, device=device
-                )
-                continue
-            paired = categorical_assignments.get((member - 4, column))
-            transformed_support, transformed_query, assignment = _categorical_column(
-                x_support[:, column],
-                x_query[:, column],
-                generator,
-                forbidden_assignment=(
-                    paired if plan.task == "classification" else None
-                ),
-            )
-            support_member[:, column] = transformed_support
-            query_member[:, column] = transformed_query
-            categorical_assignments[(member, column)] = assignment
-        rule = member % 4
-        if rule != 0:
-            for column in numeric_columns:
-                cache_key = (rule, column)
-                transformed = numeric_transform_cache.get(cache_key)
-                if transformed is None:
-                    transformed = _numeric_column(
-                        x_support[:, column],
-                        x_query[:, column],
-                        rule,
-                        generator,
-                        regression=plan.task == "regression",
-                    )
-                    if rule in (1, 2):
-                        numeric_transform_cache[cache_key] = transformed
-                support_member[:, column], query_member[:, column] = transformed
-        # Every member is transformed differently, so its basis differs too; that
-        # is the diversity this buys over one projection shared by all members.
-        if plan.n_svd:
-            support_member, query_member = _append_svd_components(
-                support_member, query_member, plan.n_svd
-            )
-        # Permute the augmented width, not the input width: the appended columns
-        # have to be ordered with the rest, and a short permutation would drop them.
-        feature_order = torch.randperm(
-            support_member.shape[1], dtype=torch.int64, device=device, generator=generator
+    if isinstance(query_values, torch.Tensor):
+        query_values = query_values.detach().cpu().numpy()
+    device = x_support.device if preprocessor is None else preprocessor.device
+    if preprocessor is None:
+        preprocessor = _FeatureEnsemble(
+            plan.members, plan.seed, device=device, task=plan.task,
+            class_count=int(torch.unique(y_support).numel()) if plan.task == "classification" else None,
+        ).fit(
+            x_support.detach().cpu().numpy(), categorical_mask
         )
+    if preprocessor.members != plan.members or preprocessor.support_members.shape[1] != x_support.shape[0]:
+        raise ValueError("preprocessor differs from ensemble support")
+    support = torch.as_tensor(preprocessor.support_members, device=device)
+    query = torch.as_tensor(preprocessor.transform(query_values), device=device)
+    features = torch.as_tensor(preprocessor.orders, dtype=torch.int64, device=device)
+    if plan.n_svd:
+        augmented = [
+            _append_svd_components(support[i], query[i], plan.n_svd)
+            for i in range(plan.members)
+        ]
+        support = torch.stack([pair[0] for pair in augmented])
+        query = torch.stack([pair[1] for pair in augmented])
+        extra = features.max() + 1 + torch.arange(plan.n_svd, device=device)
+        features = torch.cat((features, extra.expand(plan.members, -1)), dim=1)
+    generator = torch.Generator(device=device).set_state(preprocessor.target_rng_state)
+    y_support = y_support.to(device)
+    labels, permutations, signs = [], [], []
+    count = int(torch.unique(y_support).numel()) if plan.task == "classification" else None
+    offsets = torch.empty(0, dtype=torch.int64, device=device)
+    for _ in range(plan.members):
         if plan.task == "regression":
-            encoded_labels = y_support.clone()
-            class_order = None
-        elif member == 0:
-            assert class_count is not None
-            class_order = torch.arange(class_count, dtype=torch.int64, device=device)
-            encoded_labels = class_order[y_support.to(torch.int64)].to(y_support.dtype)
+            sign = torch.empty((1, 1), dtype=y_support.dtype, device=device)
+            sign.bernoulli_(0.5, generator=generator).mul_(-2).add_(1)
+            signs.append(sign.reshape(()))
+            labels.append(y_support * sign.reshape(()))
         else:
-            assert class_count is not None
-            class_order = _random_permutation(
-                class_count,
-                device=device,
-                generator=generator,
-                forbidden=(
-                    class_permutations[member - 4] if member >= 4 else None
-                ),
-            )
-            encoded_labels = class_order[y_support.to(torch.int64)].to(y_support.dtype)
-        support_members.append(support_member[:, feature_order])
-        query_members.append(query_member[:, feature_order])
-        label_members.append(encoded_labels)
-        feature_permutations.append(feature_order)
-        if class_order is not None:
-            class_permutations.append(class_order)
-
+            if offsets.numel() == 0:
+                offsets = torch.randperm(count, generator=generator, device=device)
+            order = (torch.arange(count, device=device) - offsets[0]) % count
+            offsets = offsets[1:]
+            permutations.append(order)
+            labels.append(order[y_support.to(torch.int64)].to(y_support.dtype))
     fitted = replace(
         plan,
-        feature_permutations=torch.stack(feature_permutations),
-        class_permutations=(
-            torch.stack(class_permutations)
-            if plan.task == "classification"
-            else None
-        ),
-        class_count=class_count,
+        feature_permutations=features,
+        class_permutations=torch.stack(permutations) if permutations else None,
+        class_count=count,
+        target_signs=torch.stack(signs) if signs else None,
     )
-    return (
-        torch.stack(support_members),
-        torch.stack(label_members),
-        torch.stack(query_members),
-        fitted,
-    )
+    return support, torch.stack(labels), query, fitted
 
 
 def _is_permutation_rows(values: torch.Tensor, width: int) -> bool:
@@ -578,9 +525,7 @@ def aggregate_probabilities(
     )
     if not consistent:
         raise RuntimeError("fitted metadata is inconsistent")
-    if not _is_permutation_rows(features, features.shape[1]) or not _is_permutation_rows(
-        classes, count
-    ):
+    if bool((features < 0).any()) or bool((torch.diff(features.sort(dim=1).values, dim=1) == 0).any()) or not _is_permutation_rows(classes, count):
         raise RuntimeError("fitted metadata does not contain permutations")
     if member_logits.shape[2] < count:
         raise ValueError("too few class-score columns")

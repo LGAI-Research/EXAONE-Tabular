@@ -155,7 +155,7 @@ class PreprocessingConfig(_StrictMappingValue):
 @dataclass(frozen=True, kw_only=True)
 class RuntimeConfig(_StrictMappingValue):
     support_row_limit: int = 100000
-    feature_limit: int = 100
+    feature_limit: int = 500
     query_batch_limit: int = 1024
     ensemble_count: int = 8
     # fp16 over bf16: same 2-byte footprint and tensor-core throughput, but 10
@@ -229,22 +229,16 @@ class RegressionConfig(_StrictMappingValue):
 
     quantile_count: int = 999
     decoder_hidden_width: int = 384
-    point_estimate: str = "trimmed"
+    point_estimate: str = "mean"
     # SVD components appended to every ensemble member's features; 0 disables the
     # augmentation and leaves the model's input at the preprocessed width.
-    n_svd: int = 16
-    # Withhold the augmentation from small, narrow, all-numeric tables, where a
-    # near-full-rank SVD only restates the input. Off by default because the split
-    # below already prices the augmentation by weight, making an all-or-nothing
-    # exemption redundant; turn it on to run the gated arm instead.
+    n_svd: int = 0
+    # Optionally exempt small, narrow, all-numeric tables from SVD augmentation.
     svd_gate: bool = False
-    # Run two ensembles -- one un-augmented, one at n_svd -- and pool their members
-    # into a single prediction, so the weight fit arbitrates between the two views.
-    # Doubles members and forwards, at predict as well as fit.
-    svd_split: bool = True
-    # How the members' point predictions are combined. "nnls" fits non-negative
-    # weights against a held-out slice of the support set; "uniform" averages.
-    member_weighting: str = "nnls"
+    # Optionally pool augmented and unaugmented ensembles.
+    svd_split: bool = False
+    # "trimmed" averages quantiles after removing each tail's 20% of members.
+    member_weighting: str = "trimmed"
     # Blend toward the uniform 1/E. NNLS on a small validation split is sparse
     # enough to drop members outright, and this bounds how far it may stray.
     nnls_shrinkage: float = 0.75
@@ -255,10 +249,10 @@ class RegressionConfig(_StrictMappingValue):
     nnls_min_validation_rows: int = 2000
 
     def __post_init__(self) -> None:
-        if self.point_estimate not in ("median", "trimmed"):
-            raise ValueError("point_estimate must be 'median' or 'trimmed'")
-        if self.member_weighting not in ("uniform", "nnls"):
-            raise ValueError("member_weighting must be 'uniform' or 'nnls'")
+        if self.point_estimate not in ("mean", "median", "trimmed"):
+            raise ValueError("point_estimate must be 'mean', 'median' or 'trimmed'")
+        if self.member_weighting not in ("trimmed", "uniform", "nnls"):
+            raise ValueError("member_weighting must be 'trimmed', 'uniform' or 'nnls'")
         object.__setattr__(
             self,
             "nnls_shrinkage",
@@ -373,13 +367,7 @@ class FeatureSelectionConfig(_StrictMappingValue):
         }
 
 
-# The one selection configuration this package implements. It is deliberately *not*
-# part of InferenceManifest or ReleasedCheckpoint: what the scorers name is the
-# architecture's token layout — `y_attn` is the target-token query, `sumi_to_feat`
-# the item-summary token queries, and `last` the final feature-attention module —
-# so it is identical
-# for every checkpoint of this architecture rather than a property of any one weights
-# file. Selection is unconditional; there is no opt-out.
+# Settings for explicit attention feature selection.
 FEATURE_SELECTION = FeatureSelectionConfig(
     target_feature_count=100,
     pre_pass_row_limit=512,
