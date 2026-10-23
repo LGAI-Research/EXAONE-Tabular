@@ -235,37 +235,27 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 reg = EXAONETabularRegressor.from_pretrained(device="cuda:0")   # download + verify + load
 
-reg.fit(X_train, y_train)          # y: (n,) real-valued, finite — fits ensemble weights
+reg.fit(X_train, y_train)          # stores context and fitted transforms
 y_pred = reg.predict(X_test)       # (n_samples,) float64 point estimates
 ```
 
-The head predicts a **999-quantile distribution** per row, which `predict` reduces to one number:
-by default a **trimmed mean** — the trapezoidal average over the central 99.8% of the quantile
-function, sorted first so crossed quantiles cannot flip the order. That targets the conditional
-mean, which is what RMSE scores and what the median misses on skewed targets. To read the median
-quantile instead, pass a `manifest=` whose `RegressionConfig` sets `point_estimate="median"`.
+The head predicts 999 quantiles per row. By default, predictions are restored to the
+original target scale and sorted, then averaged across members after removing the lowest
+and highest 20% at each quantile. The final prediction is the arithmetic mean of those quantiles.
+With eight members, one member is removed from each tail at each quantile.
 
-The ensemble members are then **weighted, not averaged**. `fit` holds out 20% of the support set,
-predicts it from the rows that remain, and solves for non-negative member weights by least squares
-(NNLS), rescaled to sum to one and blended 75/25 with the uniform `1/E`. Members whose preprocessing
-rule suits your table earn more of the vote; non-negativity keeps the result a convex combination,
-and the blend bounds how far a fit on a small split can stray from the uniform prior. This costs one
-extra forward pass inside `fit` — `predict` stays single-pass.
-
-The fit needs **2000 held-out rows** (`nnls_min_validation_rows`), so it engages from roughly 10k
-support rows up; smaller tables log a warning and stay on the uniform mean, because a handful of
-weights fitted against a few dozen rows is where the solve degenerates. Set
-`RegressionConfig.member_weighting="uniform"` to switch it off entirely.
-
-Targets are standardized against the fitted support set and the prediction is mapped back, so `y`
-needs no scaling of your own — but it must be finite; `NaN`/`inf` targets raise.
-Tables wider than **1024 columns** are narrowed by univariate `f_regression` (see
-[Feature selection](#feature-selection-wide-tables)).
+Targets use support-fitted population standardization and member-specific sign flips;
+prediction reverses both. Targets must be finite. `point_estimate="median"` and
+`point_estimate="trimmed"` retain the median and trapezoidal readouts. NNLS weighting
+remains available with `member_weighting="nnls"`; `"uniform"` averages member predictions.
+NNLS requires at least `nnls_min_validation_rows` held-out rows (default 2000), otherwise
+it uses uniform weights.
 </details>
 
-> **NaNs and categoricals.** `X` must be numeric — encode string/categorical columns to numeric
-> codes before `fit` (e.g. a stable ordinal map), leaving unseen/missing values as `NaN`. The
-> built-in preprocessor mean-imputes `NaN`s; it does not encode raw strings.
+> **NaNs and categoricals.** `X` must be numeric; encode strings before calling `fit`.
+> Both estimators accept `fit(X, y, categorical_mask=mask)`, with one boolean per input column.
+> If omitted, columns with fewer than 10 distinct non-missing support values are categorical.
+> Numerical NaNs are preserved; categorical missing and unseen values share code `-1`.
 
 ### Overrides
 
@@ -345,65 +335,19 @@ The frozen manifests the released estimators use live in `presets.py` and are re
 
 ### Feature selection (wide tables)
 
-The classifier accepts tables of any width, but the model itself reads at most **100 columns**. When
-`fit` receives a wider table, it chooses which columns to keep using the model's own attention —
-there is no flag, and nothing to configure:
+Both estimators fit preprocessing on the support set and reuse it for queries. Numerical
+columns use float64 standardization and clipping, then cycle through identity, Yeo–Johnson,
+robust scaling, and rank normalization across ensemble members. Categorical columns use
+support-fitted ordinal codes; columns with more than 50 categories also add log-count features.
 
-```python
-clf = EXAONETabularClassifier.from_pretrained(device="cuda:0")
-clf.fit(X_train, y_train)          # X_train: (n, 5000) — selection runs here
+After preprocessing, each member uses a Latin column permutation and keeps at most **500 columns**.
+A smaller `RuntimeConfig.feature_limit` is respected. Attention and F-test selection are no longer
+used by the estimators. `n_features_in_` retains the original width; `selected_feature_indices_`
+returns `None` because there is no shared selection across members.
 
-clf.n_features_in_                 # 5000 — the public width does not change
-clf.selected_feature_indices_      # (100,) int64, the columns actually kept
-clf.predict_proba(X_test)          # still takes all 5000 columns
-```
-
-**How it works.** One forward pass over a ≤512-row sample of the fitted table, with the
-feature-attention blocks instrumented. Two signals are read per column — attention from the
-target-token query and the summed attention from the item-summary token queries — each weighted by
-the value-vector norm so the score reflects information actually routed through the attention path
-rather than raw attention probability. The two are min-max normalized, averaged, and the top 100
-columns are kept.
-
-**What to expect.**
-
-- Narrow tables (`n_features ≤ 100`) skip this entirely — the pass does not run.
-- Selection is **internal**. `n_features_in_`, `predict`, and `predict_proba` all keep the original
-  width; the fitted column subset is reapplied for you.
-- It costs one extra forward pass per `fit` on a wide table. A GPU is strongly recommended, and in
-  this version there is **no way to disable it**.
-- Classification only — see below for the regressor.
-
-The configuration is frozen in `config.py` as `FEATURE_SELECTION`. It belongs to the
-architecture rather than to any one checkpoint — the scorers name the model's token layout, so
-the same settings apply to every classifier checkpoint of this architecture.
-
-**Optional support-SVD augmentation.** By default, the classifier does not append support-SVD
-components (`ClassificationConfig.n_svd=0`). Set `n_svd` to a positive integer—for example,
-`n_svd=8`—to append that many components to every ensemble member's features, with each member
-projecting onto its own basis. Once enabled, this augmentation is unconditional: unlike the
-regressor, classification has no small-table exemption or un-augmented comparison arm because
-probability aggregation averages members rather than fitting member weights.
-
-**The regressor narrows differently.** `EXAONETabularRegressor` reads up to **1024 columns** and
-trims anything wider with univariate `f_regression` — an F-test against the target, so it costs no
-extra forward pass and uses no attention. It then appends **16 support-SVD components** to every
-ensemble member's features (`RegressionConfig.n_svd`), each member projecting onto its own basis,
-so the model sees the kept columns plus that augmentation.
-
-Two knobs control when that augmentation applies, both settled once in `fit` against the whole
-support:
-
-- **`svd_gate`** (default `False`) withholds it from small, narrow, all-numeric tables — fewer than
-  1000 rows *and* fewer than 10 columns *and* no categorical column — where a near-full-rank SVD
-  only restates the input. Off by default because the split below already prices the augmentation by
-  weight; set `True` to make the exemption an all-or-nothing decision instead.
-- **`svd_split`** (default `True`) runs **two** ensembles instead of one, an un-augmented pass and
-  an augmented pass, and pools their members into a single prediction so the weight fit decides how
-  much the augmentation is worth rather than the gate deciding all-or-nothing. It doubles both the
-  member count and the **forwards, at predict as well as fit**. Both passes share the run's seed, so
-  a member differs across them only by the augmentation. With nothing to contrast against — exempted
-  by the gate, or `n_svd=0` — a split run collapses back to the single pass.
+SVD augmentation is disabled by default. Set `ClassificationConfig.n_svd` or
+`RegressionConfig.n_svd` to enable it. Regression's `svd_gate` and `svd_split` remain available
+and default to `False`. `svd_split=True` pools separate augmented and unaugmented ensembles.
 
 ### Controlling the GPU memory budget
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -12,13 +11,13 @@ from sklearn.utils import ClassifierTags, InputTags, Tags, TargetTags
 from torch import nn
 
 from ._execution import _InferenceExecutor
+from ._inference_preprocessing import _FeatureEnsemble
 from .checkpoint import load_classifier_checkpoint
 from .config import FEATURE_SELECTION, InferenceManifest
 from .ecoc import ECOCCodec
 from .ensemble import EnsemblePlan, aggregate_probabilities, build_ensemble_inputs
-from .feature_selection import select_features
 from .model.heads import ClassificationModel
-from .preprocessing import TabularPreprocessor
+from .preprocessing import TabularPreprocessor, _resolve_categorical_mask
 from .presets import released_checkpoint
 from .weights import resolve_weights
 
@@ -60,13 +59,6 @@ class EXAONETabularClassifier:
                 raise ValueError("max_vram_bytes requires a CUDA device")
         self.max_vram_bytes = max_vram_bytes
         self.feature_selection = FEATURE_SELECTION
-        # feature_limit is the model's hard input width, so it wins where it is the
-        # tighter of the two; selecting past it would only hand the preprocessor more
-        # columns than it can keep, and f_classif would re-truncate them.
-        self._selection_target = min(
-            self.feature_selection.target_feature_count,
-            manifest.runtime.feature_limit,
-        )
         if model is None:
             dtype = _COMPUTE_DTYPES[manifest.runtime.compute_dtype]
             with torch.random.fork_rng(devices=[], enabled=True):
@@ -103,8 +95,7 @@ class EXAONETabularClassifier:
         knobs; ``manifest=`` replaces the whole configuration for a fully custom
         checkpoint.
 
-        Tables wider than the feature limit are narrowed by attention feature
-        selection during ``fit``; see :attr:`selected_feature_indices_`.
+        Each ensemble member reads at most 500 preprocessed columns.
         """
         checkpoint = released_checkpoint("classification")
         base_manifest = checkpoint.manifest if manifest is None else manifest
@@ -205,11 +196,17 @@ class EXAONETabularClassifier:
 
     @property
     def selected_feature_indices_(self) -> np.ndarray | None:
-        """Columns kept by feature selection, or None when the table was narrow."""
+        """Return None: columns are selected separately for each member."""
         columns = self._state()["selected_columns"]
         return None if columns is None else columns.copy()
 
-    def fit(self, features: np.ndarray, targets: np.ndarray) -> "EXAONETabularClassifier":
+    def fit(
+        self,
+        features: np.ndarray,
+        targets: np.ndarray,
+        *,
+        categorical_mask: np.ndarray | None = None,
+    ) -> "EXAONETabularClassifier":
         if not isinstance(features, np.ndarray):
             raise TypeError("features must be a NumPy array")
         if not isinstance(targets, np.ndarray):
@@ -234,29 +231,9 @@ class EXAONETabularClassifier:
         if classes.size < 2:
             raise ValueError("at least two target classes are required")
         ordinal = np.asarray(ordinal, dtype=np.int64)
+        resolved_categorical_mask = _resolve_categorical_mask(features, categorical_mask)
 
-        # Selection runs on the raw table, before preprocessing, and hands the
-        # preprocessor its columns; narrow tables skip the pre-pass entirely.
-        selected_columns = None
-        if features.shape[1] > self._selection_target:
-            selected_columns = select_features(
-                model=self.model,
-                features=features,
-                targets=ordinal,
-                config=replace(
-                    self.feature_selection,
-                    target_feature_count=self._selection_target,
-                ),
-                max_vram_bytes=self.max_vram_bytes,
-            )
-        preprocessor = TabularPreprocessor(
-            self.manifest.runtime.feature_limit,
-            gaussianize=self.manifest.preprocessing.use_quantile_map,
-            feature_count_rescale=self.manifest.preprocessing.rescale_for_column_count,
-            fixed_columns=selected_columns,
-        )
-        prepared = preprocessor.fit_transform(features, ordinal)
-        values = np.array(prepared.values, copy=True)
+        values = np.array(features, copy=True)
 
         row_limit = self.manifest.runtime.support_row_limit
         if values.shape[0] > row_limit:
@@ -267,6 +244,16 @@ class EXAONETabularClassifier:
             ordinal = np.array(ordinal[indices], dtype=np.int64, copy=True)
         else:
             ordinal = np.array(ordinal, dtype=np.int64, copy=True)
+
+        preprocessor = _FeatureEnsemble(
+            self.manifest.runtime.ensemble_count,
+            self.manifest.runtime.seed,
+            self.manifest.runtime.feature_limit,
+            device=self.device,
+            gaussianize=self.manifest.preprocessing.use_quantile_map,
+            rescale=self.manifest.preprocessing.rescale_for_column_count,
+            task="classification", class_count=int(np.unique(ordinal).size),
+        ).fit(values, resolved_categorical_mask)
 
         codec = None
         if classes.size > self.manifest.model.class_capacity:
@@ -283,7 +270,8 @@ class EXAONETabularClassifier:
             "preprocessor": preprocessor,
             "classes": np.array(classes, copy=True),
             "n_features": features.shape[1],
-            "selected_columns": selected_columns,
+            "categorical_mask": resolved_categorical_mask,
+            "selected_columns": None,
             "support_x": values,
             "support_y": ordinal,
             "codec": codec,
@@ -299,25 +287,26 @@ class EXAONETabularClassifier:
             raise ValueError("features must have rank two")
         if features.shape[1] != state["n_features"]:
             raise ValueError("query feature width differs from fitted width")
+        TabularPreprocessor._validate_features(features, allow_zero_rows=True)
         if features.shape[0] == 0:
             # Validate the feature domain through the fitted boundary while
             # deliberately avoiding model execution.
             state["preprocessor"].transform(features)
             return np.empty((0, state["classes"].size), dtype=np.float64)
 
-        query = np.array(state["preprocessor"].transform(features).values, copy=True)
+        query = np.array(features, copy=True)
         self.model.eval()
         with torch.inference_mode():
             if state["codec"] is None:
                 probabilities = self._infer_problem(
                     state["support_x"], state["support_y"], query,
-                    int(state["classes"].size),
+                    int(state["classes"].size), preprocessor=state["preprocessor"],
                 )
             else:
                 encoded = state["codec"].encode(state["support_y"])
                 rows = [
                     self._infer_ecoc_row(
-                        state["support_x"], encoded[index], query
+                        state["support_x"], encoded[index], query, preprocessor=state["preprocessor"]
                     )
                     for index in range(encoded.shape[0])
                 ]
@@ -337,6 +326,8 @@ class EXAONETabularClassifier:
         support_y: np.ndarray,
         query_x: np.ndarray,
         class_count: int,
+        *,
+        preprocessor: _FeatureEnsemble | None = None,
     ) -> np.ndarray:
         represented, remapped_targets = np.unique(support_y, return_inverse=True)
         represented = np.asarray(represented, dtype=np.int64)
@@ -360,15 +351,15 @@ class EXAONETabularClassifier:
                 support_x,
                 np.asarray(remapped_targets, dtype=np.int64),
                 query_x,
-                int(represented.size),
+                int(represented.size), preprocessor=preprocessor,
             )
             probabilities = np.zeros((query_x.shape[0], class_count), dtype=np.float64)
             probabilities[:, represented] = np.asarray(local, dtype=np.float64)
             return probabilities
 
-        x_support = torch.as_tensor(support_x, dtype=torch.float32, device=self.device)
-        y_support = torch.as_tensor(support_y, dtype=torch.float32, device=self.device)
-        x_query = torch.as_tensor(query_x, dtype=torch.float32, device=self.device)
+        x_support = torch.as_tensor(support_x, dtype=torch.float64)
+        y_support = torch.as_tensor(support_y, dtype=torch.float32)
+        x_query = query_x
         assert self.manifest.classification is not None
         plan = EnsemblePlan(
             members=self.manifest.runtime.ensemble_count,
@@ -376,7 +367,7 @@ class EXAONETabularClassifier:
             n_svd=self.manifest.classification.n_svd,
         )
         ens_xs, ens_ys, ens_xq, fitted_plan = build_ensemble_inputs(
-            x_support, y_support, x_query, plan
+            x_support, y_support, x_query, plan, preprocessor=preprocessor
         )
         logits = self._forward_chunked(ens_xs, ens_ys, ens_xq)
         expected = (
@@ -410,6 +401,8 @@ class EXAONETabularClassifier:
         support_x: np.ndarray,
         encoded_targets: np.ndarray,
         query_x: np.ndarray,
+        *,
+        preprocessor: _FeatureEnsemble | None = None,
     ) -> np.ndarray:
         """Infer one code row while preserving the codec's symbol columns.
 
@@ -426,7 +419,7 @@ class EXAONETabularClassifier:
             support_x,
             np.asarray(remapped_targets, dtype=np.int64),
             query_x,
-            int(symbols.size),
+            int(symbols.size), preprocessor=preprocessor,
         )
         capacity = self.manifest.model.class_capacity
         symbol_probabilities = np.zeros(

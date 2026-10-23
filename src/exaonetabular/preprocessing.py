@@ -31,6 +31,14 @@ class _FittedState:
     quantile_mapper: QuantileTransformer | None
 
 
+@dataclass(frozen=True)
+class _NumericBaseState:
+    input_width: int
+    columns: np.ndarray
+    centers: np.ndarray
+    divisors: np.ndarray
+
+
 class TabularPreprocessor:
     """Fit and apply numeric classification-table preprocessing."""
 
@@ -260,6 +268,56 @@ class TabularPreprocessor:
             except Exception:
                 pass
         return False
+
+
+def _fit_numeric_base(features: np.ndarray) -> _NumericBaseState:
+    matrix = TabularPreprocessor._validate_features(
+        features, allow_zero_rows=False
+    ).astype(np.float64)
+    columns = np.arange(matrix.shape[1], dtype=np.int64)
+    if matrix.shape[0] > 1:
+        keep = np.any(matrix != matrix[:1], axis=0) & ~np.isnan(matrix).all(axis=0)
+        columns = columns[keep]
+    selected = matrix[:, columns]
+    finite = np.isfinite(selected)
+    counts = np.maximum(finite.sum(axis=0), 1)
+    centers = np.where(finite, selected, 0.0).sum(axis=0) / counts
+    centered = np.where(finite, selected - centers, 0.0)
+    divisors = np.sqrt(np.square(centered).sum(axis=0) / counts) + 1e-6
+    return _NumericBaseState(matrix.shape[1], columns, centers, divisors)
+
+
+def _transform_numeric_base(
+    features: np.ndarray, state: _NumericBaseState
+) -> PreparedBatch:
+    matrix = TabularPreprocessor._validate_features(features, allow_zero_rows=True)
+    if matrix.shape[1] != state.input_width:
+        raise ValueError("feature width differs from fitted width")
+    selected = matrix[:, state.columns].astype(np.float64)
+    values = np.clip((selected - state.centers) / state.divisors, -100.0, 100.0)
+    return PreparedBatch(values, np.isnan(selected), state.columns.copy())
+
+
+def _resolve_categorical_mask(
+    features: np.ndarray, categorical_mask: np.ndarray | None = None
+) -> np.ndarray:
+    matrix = TabularPreprocessor._validate_features(features, allow_zero_rows=False)
+    if categorical_mask is not None:
+        if not isinstance(categorical_mask, np.ndarray):
+            raise TypeError("categorical_mask must be a NumPy array")
+        if categorical_mask.dtype != np.bool_:
+            raise TypeError("categorical_mask must have a boolean dtype")
+        if categorical_mask.ndim != 1 or categorical_mask.size != matrix.shape[1]:
+            raise ValueError("categorical_mask must have one entry per feature")
+        return categorical_mask.copy()
+
+    return np.array(
+        [
+            np.unique(column[~np.isnan(column)]).size < 10
+            for column in matrix.T
+        ],
+        dtype=np.bool_,
+    )
 
 
 __all__ = ["PreparedBatch", "TabularPreprocessor"]
