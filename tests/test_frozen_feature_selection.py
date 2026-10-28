@@ -1,4 +1,4 @@
-"""The frozen feature-selection config, and how the classifier applies it."""
+"""Attention selection utilities and inference column selection."""
 
 from __future__ import annotations
 
@@ -124,59 +124,40 @@ def test_feature_selection_package_surface_is_one_function() -> None:
 # --- how the classifier applies it -------------------------------------------
 
 
-def test_narrow_table_skips_selection() -> None:
+def test_narrow_table_keeps_all_nonconstant_columns() -> None:
     features, targets = _table(40, 20)
-    classifier = EXAONETabularClassifier(_manifest(), device="cpu").fit(
-        features, targets
-    )
+    classifier = EXAONETabularClassifier(_manifest(), device="cpu").fit(features, targets)
     assert classifier.selected_feature_indices_ is None
-    columns = classifier._state()["preprocessor"].selected_columns
-    assert np.array_equal(columns, np.arange(20))
+    assert classifier._state()["preprocessor"].support_members.shape == (2, 40, 20)
 
 
-def test_wide_table_is_narrowed_to_the_target() -> None:
-    features, targets = _table(60, 130)
-    classifier = EXAONETabularClassifier(_manifest(), device="cpu").fit(
-        features, targets
-    )
-    selected = classifier.selected_feature_indices_
-    assert selected.shape == (100,)
-    assert selected.dtype == np.int64
-    assert np.all(np.diff(selected) > 0)          # sorted, no duplicates
-    assert selected.max() < 130
-    # The preprocessor was handed exactly those columns rather than running its own
-    # f_classif truncation.
-    assert np.array_equal(
-        classifier._state()["preprocessor"].selected_columns, selected
-    )
+def test_wide_table_selects_columns_per_member() -> None:
+    features, targets = _table(60, 530)
+    classifier = EXAONETabularClassifier(_manifest(feature_limit=500)).fit(features, targets)
+    orders = classifier._state()["preprocessor"].orders
+    assert classifier.selected_feature_indices_ is None
+    assert orders.shape == (2, 500)
+    assert not np.array_equal(orders[0], orders[1])
+    assert all(np.unique(row).size == 500 for row in orders)
+    assert classifier._state()["preprocessor"].support_members.shape == (2, 60, 500)
 
 
 def test_selection_does_not_change_the_public_width() -> None:
     features, targets = _table(60, 130)
-    classifier = EXAONETabularClassifier(_manifest(), device="cpu").fit(
-        features, targets
-    )
+    classifier = EXAONETabularClassifier(_manifest()).fit(features, targets)
     assert classifier.n_features_in_ == 130
-    probabilities = classifier.predict_proba(features[:5])
-    assert probabilities.shape == (5, 3)
+    assert classifier.predict_proba(features[:5]).shape == (5, 3)
     with pytest.raises(ValueError):
         classifier.predict_proba(features[:5, :100])
 
 
-def test_selection_target_respects_a_tighter_feature_limit() -> None:
-    """feature_limit is the model's hard width, so it wins when it is smaller."""
+def test_selection_respects_a_tighter_feature_limit() -> None:
     features, targets = _table(40, 30)
-    classifier = EXAONETabularClassifier(_manifest(feature_limit=8), device="cpu").fit(
-        features, targets
-    )
-    assert classifier.selected_feature_indices_.shape == (8,)
+    classifier = EXAONETabularClassifier(_manifest(feature_limit=8)).fit(features, targets)
+    assert classifier._state()["preprocessor"].orders.shape == (2, 8)
 
 
-def test_selected_indices_are_a_copy() -> None:
-    features, targets = _table(60, 130)
-    classifier = EXAONETabularClassifier(_manifest(), device="cpu").fit(
-        features, targets
-    )
-    first = classifier.selected_feature_indices_
-    first[0] = -1
-    assert classifier.selected_feature_indices_[0] != -1
+def test_selection_never_exceeds_500_columns() -> None:
+    features, targets = _table(40, 520)
+    classifier = EXAONETabularClassifier(_manifest(feature_limit=1024)).fit(features, targets)
+    assert classifier._state()["preprocessor"].orders.shape == (2, 500)
